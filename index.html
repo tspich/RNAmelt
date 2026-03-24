@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RNA Melt — Van't Hoff Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg:      '#f4f3ef',
+        surface: '#ffffff',
+        surface2:'#f0efe9',
+        border:  '#dddbd3',
+        accent:  '#1a6b4a',
+        accent2: '#c0392b',
+        accent3: '#2471a3',
+        muted:   '#888880',
+        ink:     '#1a1a18',
+      },
+      fontFamily: {
+        sans: ['DM Sans', 'sans-serif'],
+        mono: ['DM Mono', 'monospace'],
+      },
+    }
+  }
+}
+</script>
+<style>
+  :root {
+    --accent:  #1a6b4a;
+    --accent2: #c0392b;
+    --border:  #dddbd3;
+    --surface2:#f0efe9;
+    --muted:   #888880;
+  }
+
+  input[type=number] { -moz-appearance:textfield; }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+
+  .sidebar::-webkit-scrollbar { width:4px; }
+  .sidebar::-webkit-scrollbar-track { background:transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+
+  /* Pill radio */
+  .radio-pill input[type=radio] { display:none; }
+  .radio-pill label {
+    display:block; text-align:center; padding:6px 8px;
+    border-radius:6px; border:1px solid var(--border);
+    background:var(--surface2); font-size:.73rem; font-weight:500;
+    cursor:pointer; transition:all .15s; color:var(--muted);
+    user-select:none; font-family:'DM Mono', monospace; white-space:nowrap;
+  }
+  .radio-pill input[type=radio]:checked + label { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .radio-pill label:hover { border-color:var(--accent); color:var(--accent); }
+  .radio-pill input[type=radio]:checked + label:hover { color:#fff; }
+
+  /* Toggle */
+  .toggle-wrap { position:relative; width:36px; height:20px; cursor:pointer; flex-shrink:0; }
+  .toggle-wrap input { display:none; }
+  .toggle-track { position:absolute; inset:0; background:var(--border); border-radius:100px; transition:background .2s; }
+  .toggle-wrap input:checked + .toggle-track { background:var(--accent); }
+  .toggle-thumb { position:absolute; top:3px; left:3px; width:14px; height:14px; background:#fff; border-radius:50%; transition:transform .2s; pointer-events:none; }
+  .toggle-wrap input:checked ~ .toggle-thumb { transform:translateX(16px); }
+
+  /* Sidebar inputs */
+  .sb-input {
+    width:100%; padding:6px 9px;
+    border:1px solid var(--border); border-radius:6px;
+    background:var(--surface2); color:#1a1a18;
+    font-family:'DM Mono', monospace; font-size:.76rem;
+    outline:none; transition:border-color .15s;
+  }
+  .sb-input:focus { border-color:var(--accent); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .pulse { animation:pulse 1s infinite; }
+  .pulse-fast { animation:pulse .7s infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .spin { animation:spin .7s linear infinite; }
+
+  canvas { max-height:240px; }
+
+  .vhoff-table th {
+    padding:8px 12px; font-size:.66rem; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--muted); background:var(--surface2);
+    text-align:left; border-bottom:1px solid var(--border);
+    font-family:'DM Mono',monospace;
+  }
+  .vhoff-table td { padding:8px 12px; border-bottom:1px solid var(--border); font-family:'DM Mono',monospace; font-size:.76rem; }
+  .vhoff-table tr:last-child td { border-bottom:none; }
+  .vhoff-table tr:hover td { background:#fafaf8; }
+
+  .sb-section-title {
+    font-size:.63rem; font-weight:600; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:10px;
+  }
+</style>
+</head>
+<body class="bg-bg text-ink font-sans text-sm leading-relaxed">
+
+<div class="flex min-h-screen">
+
+<!-- ════════════════════ SIDEBAR ════════════════════ -->
+<aside class="sidebar flex flex-col bg-surface border-r border-border sticky top-0 h-screen overflow-y-auto shrink-0" style="width:340px">
+
+  <!-- Logo -->
+  <div class="px-5 py-4 border-b border-border shrink-0">
+    <div class="text-base font-semibold tracking-tight">RNA<span class="text-accent">Melt</span></div>
+    <div class="text-xs font-mono text-muted mt-0.5">// van't hoff · two-state · in-browser</div>
+  </div>
+
+  <!-- ① Signal & structure type -->
+  <div class="px-5 py-4 border-b border-border">
+    <div class="sb-section-title">Experiment</div>
+
+    <div class="mb-3">
+      <div class="text-xs font-medium mb-1.5">Signal type</div>
+      <div class="flex gap-1.5">
+        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigAbs" value="absorbance"><label for="sigAbs">Absorbance</label></div>
+        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigFlu" value="fluorescence" checked><label for="sigFlu">Fluorescence</label></div>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <div class="text-xs font-medium mb-1.5">Structure type</div>
+      <div class="flex gap-1.5">
+        <div class="radio-pill flex-1"><input type="radio" name="structType" id="stMono" value="monomer"><label for="stMono">Monomer</label></div>
+        <div class="radio-pill flex-1"><input type="radio" name="structType" id="stHomo" value="homodimer"><label for="stHomo">Homodimer</label></div>
+        <div class="radio-pill flex-1"><input type="radio" name="structType" id="stHete" value="heterodimer" checked><label for="stHete">Heterodimer</label></div>
+      </div>
+    </div>
+
+    <!-- Signal column (hidden when only 1) -->
+    <div id="colSection" style="display:none" class="mb-0">
+      <div class="text-xs font-medium mb-1.5">Signal column</div>
+      <select id="colSelect" class="sb-input"></select>
+    </div>
+  </div>
+
+  <!-- ② Concentrations -->
+  <div class="px-5 py-4 border-b border-border">
+    <div class="sb-section-title">Concentrations</div>
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="text-xs font-medium block mb-1">Oligo C<sub>T</sub> <span class="font-mono font-normal text-muted">µM</span></label>
+        <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="e.g. 5.0">
+      </div>
+      <div>
+        <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
+        <input type="number" id="saltConc" class="sb-input" step="1" min="0" placeholder="e.g. 150">
+      </div>
+    </div>
+    <div class="text-xs font-mono text-muted mt-2">C<sub>T</sub> also adds a point to the 1/T<sub>m</sub> vs ln[C<sub>T</sub>] plot</div>
+  </div>
+
+  <!-- ③ Temperature window -->
+  <div class="px-5 py-4 border-b border-border">
+    <div class="sb-section-title">Temperature window <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
+    <div class="grid grid-cols-2 gap-2 mb-2">
+      <div>
+        <label class="text-xs font-medium block mb-1">T<sub>low</sub></label>
+        <input type="number" id="T_low" class="sb-input" step="0.5" placeholder="auto">
+      </div>
+      <div>
+        <label class="text-xs font-medium block mb-1">T<sub>high</sub></label>
+        <input type="number" id="T_high" class="sb-input" step="0.5" placeholder="auto">
+      </div>
+    </div>
+    <div class="text-xs font-mono text-muted">Only this range is used for fitting</div>
+  </div>
+
+  <!-- ④ Baseline offsets -->
+  <div class="px-5 py-4 border-b border-border">
+    <div class="sb-section-title">Baseline offsets <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
+    <div class="grid grid-cols-2 gap-2 mb-2">
+      <div>
+        <label class="text-xs font-medium block mb-1">Lower offset</label>
+        <input type="number" id="bl_lower_offset" class="sb-input" step="1" value="10">
+      </div>
+      <div>
+        <label class="text-xs font-medium block mb-1">Upper offset</label>
+        <input type="number" id="bl_upper_offset" class="sb-input" step="1" value="10">
+      </div>
+    </div>
+    <div class="text-xs font-mono text-muted leading-relaxed">
+      Lower bl: T &lt; T<sub>low</sub> − offset<br>
+      Upper bl: T &gt; T<sub>high</sub> + offset
+    </div>
+  </div>
+
+  <!-- ⑤ Fix baselines toggle -->
+  <!--<div class="px-5 py-4 border-b border-border">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-xs font-medium">Fix baselines during fit</div>
+        <div class="text-xs font-mono text-muted mt-0.5">Only ΔH and T<sub>m</sub> are free parameters</div>
+      </div>
+      <label class="toggle-wrap ml-3">
+        <input type="checkbox" id="fixBaselines">
+        <span class="toggle-track"></span>
+        <span class="toggle-thumb"></span>
+      </label>
+    </div>
+  </div>
+  -->
+
+  <!-- ⑥ Run / Auto / Reset -->
+  <div class="px-5 py-4 border-b border-border">
+    <button id="runBtn" disabled
+      class="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed mb-2">
+      ▶ Run analysis
+    </button>
+    <div class="flex gap-2">
+      <button id="autoBtn" disabled title="Reset parameters to defaults"
+        class="flex-1 flex items-center justify-center px-3 py-1.5 rounded-lg border border-border text-xs font-mono text-muted transition hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed">
+        ↺ Auto
+      </button>
+      <button id="resetBtn"
+        class="flex-1 flex items-center justify-center px-3 py-1.5 rounded-lg border border-border text-xs font-mono text-accent2 transition hover:border-accent2">
+        ✕ Reset
+      </button>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="mt-auto px-5 py-3 border-t border-border shrink-0">
+    <div class="flex items-center gap-2">
+      <span id="statusDot" class="w-2 h-2 rounded-full bg-muted shrink-0 pulse"></span>
+      <span id="statusText" class="text-xs font-mono text-muted">Loading Python…</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ════════════════════ MAIN ════════════════════ -->
+<main class="flex-1 p-8 overflow-x-hidden min-w-0">
+  <h1 class="text-xl font-semibold tracking-tight mb-1">RNA Melting Analysis</h1>
+  <p class="text-sm text-muted mb-6">Two-state model · Van't Hoff thermodynamics · Baseline correction</p>
+
+  <!-- Banners -->
+  <div id="runningBanner" class="hidden mb-4 items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+    <div class="w-3.5 h-3.5 rounded-full border-2 border-blue-300 border-t-blue-700 spin shrink-0"></div>
+    <span id="runningText">Running…</span>
+  </div>
+  <div id="errorBanner"   class="hidden mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm"></div>
+  <div id="infoBanner"    class="hidden mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm"></div>
+
+  <!-- Upload -->
+  <div id="uploadSection">
+    <div id="uploadZone"
+      class="border-2 border-dashed border-border rounded-xl px-8 py-16 text-center cursor-pointer bg-surface transition hover:border-accent hover:bg-green-50">
+      <div class="text-4xl mb-3">🧬</div>
+      <div class="font-semibold text-base mb-2">Drop your melting data CSV</div>
+      <div class="text-sm text-muted">
+        Column 0 = temperature (°C) · Columns 1+ = signal<br>
+        <strong class="text-accent font-medium">Data never leaves your browser</strong>
+      </div>
+    </div>
+    <input type="file" id="fileInput" accept=".csv" class="hidden">
+  </div>
+
+  <!-- Results -->
+  <div id="resultsSection" class="hidden">
+
+    <!-- File bar -->
+    <div class="flex items-center justify-between bg-surface rounded-xl border border-border shadow-sm px-4 py-3 mb-5 flex-wrap gap-2">
+      <span id="fileName" class="font-mono text-sm text-accent font-medium"></span>
+      <span id="fileMeta" class="font-mono text-xs text-muted"></span>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-2 gap-4 mb-5">
+
+      <div class="col-span-2 bg-surface rounded-xl border border-border shadow-sm p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Melting curve · raw + two-state fit + baselines</div>
+        <canvas id="chartMelt" style="max-height:280px"></canvas>
+      </div>
+
+      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Fraction unfolded α(T)</div>
+        <canvas id="chartAlpha"></canvas>
+      </div>
+
+      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
+        <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">dA/dT derivative · Tm estimate</div>
+        <canvas id="chartDeriv"></canvas>
+      </div>
+
+      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Fit residuals</div>
+        <canvas id="chartResiduals"></canvas>
+      </div>
+
+      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff · 1/Tm vs ln[CT]</div>
+        <canvas id="chartVhoff"></canvas>
+      </div>
+
+    </div>
+
+    <!-- Fit result cards -->
+    <div id="fitResults" class="hidden mb-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Fit results — two-state model</div>
+      <div id="resultsGrid" class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(175px,1fr))"></div>
+    </div>
+
+    <!-- Van't Hoff multi-conc -->
+    <div id="vhoffSection" class="hidden mb-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Van't Hoff — accumulated concentrations</div>
+      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-3">
+        <table class="w-full vhoff-table">
+          <thead><tr><th>CT (µM)</th><th>Tm (°C)</th><th>1/Tm (K⁻¹)</th><th>ln[CT]</th><th></th></tr></thead>
+          <tbody id="vhoffTableBody"></tbody>
+        </table>
+      </div>
+      <div id="vhoffReg" class="hidden bg-surface rounded-xl border border-border shadow-sm p-4">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Linear regression: 1/Tm = (R/ΔH)·ln[CT] + ΔS/ΔH</div>
+        <div id="vhoffRegValues" class="flex gap-6 flex-wrap font-mono text-sm"></div>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <button id="downloadBtn"
+      class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90">
+      ⬇ Download results CSV
+    </button>
+
+  </div>
+</main>
+</div>
+
+<script>
+const PYTHON_MODULES = [
+  { path: 'analysis/__init__.py' },
+  { path: 'analysis/methods.py' },
+  { path: 'analysis/functions.py' },
+  { path: 'analysis/constants.py' },
+  { path: 'analysis/util.py' },
+  { path: 'analysis/utils.py' },
+  { path: 'analysis/cleaning.py' },
+  { path: 'analysis/analysis_melting.py' },
+];
+
+let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[];
+const charts={};
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+async function boot() {
+  setStatus('loading','Loading Python…');
+  try {
+    pyodide = await loadPyodide();
+    setStatus('loading','Installing packages…');
+    await pyodide.loadPackage(['pandas','numpy','scipy']);
+    setStatus('loading','Loading modules…');
+    pyodide.FS.mkdir('/analysis');
+    for (const mod of PYTHON_MODULES) {
+      const res = await fetch(mod.path);
+      if (!res.ok) throw new Error(`Cannot fetch ${mod.path} — serve via: python -m http.server`);
+      pyodide.FS.writeFile('/'+mod.path, await res.text());
+    }
+    await pyodide.runPythonAsync(`import sys; sys.path.insert(0,'/')`);
+    setStatus('ready','Ready');
+    enableUpload();
+  } catch(e) {
+    setStatus('error','Boot failed');
+    showError(e.message);
+  }
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+function enableUpload() {
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('click', () => document.getElementById('fileInput').click());
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('border-accent','bg-green-50'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('border-accent','bg-green-50'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('border-accent','bg-green-50');
+    loadFile(e.dataTransfer.files[0]);
+  });
+  document.getElementById('fileInput').addEventListener('change', e => loadFile(e.target.files[0]));
+}
+
+async function loadFile(file) {
+  if (!file || !file.name.endsWith('.csv')) { showError('Please upload a .csv file.'); return; }
+  hideError(); showRunning('Reading & cleaning CSV…');
+  const text = await file.text();
+  pyodide.globals.set('csv_text_raw', text);
+  try {
+    await pyodide.runPythonAsync(`
+import io, importlib, pandas as pd
+import analysis.cleaning as _cl; importlib.reload(_cl)
+_df_global = _cl.clean(pd.read_csv(io.StringIO(csv_text_raw)))
+`);
+    const info = JSON.parse(await pyodide.runPythonAsync(`
+import json; from analysis.cleaning import get_signal_columns
+_sig = get_signal_columns(_df_global)
+json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
+  'T_min':float(_df_global['temperature'].min()),'T_max':float(_df_global['temperature'].max()),
+  'sig_cols':_sig})
+`));
+    dfLoaded = true;
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileMeta').textContent =
+      `${info.rows} rows · T: ${info.T_min.toFixed(1)}–${info.T_max.toFixed(1)} °C · ${info.sig_cols.length} signal column(s)`;
+    const sel = document.getElementById('colSelect');
+    sel.innerHTML = info.sig_cols.map(c=>`<option value="${c}">${c}</option>`).join('');
+    document.getElementById('colSection').style.display = info.sig_cols.length > 1 ? '' : 'none';
+    setIfEmpty('T_low',  (info.T_min).toFixed(1));
+    setIfEmpty('T_high', (info.T_max).toFixed(1));
+    document.getElementById('uploadSection').style.display = 'none';
+    document.getElementById('resultsSection').classList.remove('hidden');
+    document.getElementById('runBtn').disabled  = false;
+    document.getElementById('autoBtn').disabled = false;
+    hideRunning(); await runAnalysis();
+  } catch(e) { hideRunning(); showError('Error loading file: '+e.message); console.error(e); }
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+document.getElementById('runBtn').addEventListener('click', runAnalysis);
+document.getElementById('colSelect').addEventListener('change', runAnalysis);
+document.querySelectorAll('input[name="signalType"]').forEach(r => r.addEventListener('change', ()=>{ if(dfLoaded) runAnalysis(); }));
+document.querySelectorAll('input[name="structType"]').forEach(r  => r.addEventListener('change', ()=>{ if(dfLoaded) runAnalysis(); }));
+
+async function runAnalysis() {
+  if (!dfLoaded) return;
+  hideError(); showRunning('Fitting two-state model…');
+  setStatus('running','Running…');
+  document.getElementById('runBtn').disabled = true;
+  const params = collectParams();
+  try {
+    pyodide.globals.set('_params_json', JSON.stringify(params));
+    const raw = await pyodide.runPythonAsync(`
+import json, importlib
+import analysis.analysis_melting as _am; importlib.reload(_am)
+_params = json.loads(_params_json)
+json.dumps(_am.run(_df_global, _params))
+`);
+    const result = JSON.parse(raw);
+    console.log(JSON.stringify(result, null, 2));
+    lastResult = result;
+    if (result.error) showError(result.error);
+    else {
+      renderResults(result);
+      //if (result.vantHoff_point) accumulateVhoff(result.vantHoff_point, result.fit.Tm);
+    }
+  } catch(e) { showError('Analysis error: '+e.message); console.error(e); }
+  finally { hideRunning(); setStatus('ready','Ready'); document.getElementById('runBtn').disabled=false; }
+}
+
+document.getElementById('autoBtn').addEventListener('click', () => {
+  ['T_low','T_high'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('bl_lower_offset').value='10';
+  document.getElementById('bl_upper_offset').value='10';
+  //document.getElementById('fixBaselines').checked=false;
+  runAnalysis();
+});
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderResults(r) {
+  const fit = r.fit;
+  const sigLabel   = r.signal_type==='fluorescence' ? 'Fluorescence' : 'Absorbance';
+  const derivLabel = r.signal_type==='fluorescence' ? 'dF/dT' : 'dA/dT';
+  document.getElementById('derivTitle').textContent = `${derivLabel} derivative · Tm estimate`;
+
+  rebuildChart('chartMelt',{
+    type:'scatter', data:{datasets:[
+      {label:'Raw data',       data:zip(r.T_raw,r.raw_data), pointRadius:3, pointBackgroundColor:'#aac', borderColor:'#aac', showLine:false},
+      //{label:'Two-state fit',  data:fit?.success?zip(r.fit.T_curve,r.fit.S_curve):[], borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
+      //{label:'Lower baseline', data:fit?.success?zip(r.T_raw,r.fit.lower_bl):[], borderColor:'#e67e22', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
+      //{label:'Upper baseline', data:fit?.success?zip(r.T_raw,r.fit.upper_bl):[], borderColor:'#2471a3', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
+    ]},
+    options:scatterOpts('Temperature (°C)', sigLabel,{plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}}})
+  });
+
+  // if (fit?.success) {
+  //   rebuildChart('chartAlpha',{
+  //     type:'scatter', data:{datasets:[
+  //       {label:'Observed α', data:zip(r.fit.alpha_obs_T,r.fit.alpha_obs), pointRadius:3, pointBackgroundColor:'#7d3c98', showLine:false},
+  //       {label:'Model α',    data:zip(r.fit.alpha_fit_T,r.fit.alpha_fit), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
+  //     ]},
+  //     options:scatterOpts('Temperature (°C)','Fraction unfolded α')
+  //   });
+  //   rebuildChart('chartResiduals',{
+  //     type:'scatter', data:{datasets:[
+  //       {label:'Residual', data:zip(r.fit.residual_T,r.fit.residuals), pointRadius:3, pointBackgroundColor:'#888', showLine:false},
+  //     ]},
+  //     options:scatterOpts('Temperature (°C)','Residual (obs − fit)')
+  //   });
+  // }
+
+  rebuildChart('chartDeriv',{
+    type:'scatter', data:{datasets:[
+      {label:derivLabel, data:zip(r.T_raw,r.derivative), borderColor:'#c0392b', borderWidth:1.5, pointRadius:0, showLine:true, tension:.3},
+    ]},
+    options:scatterOpts('Temperature (°C)', derivLabel)
+  });
+
+  //if (fit?.success) {
+  //  document.getElementById('fitResults').classList.remove('hidden');
+  //  document.getElementById('resultsGrid').innerHTML = [
+  //    card('T<sub>m</sub>',              fit.Tm.toFixed(2),           '± '+fit.Tm_err.toFixed(2),        '°C'),
+  //    card('ΔH°',                        (fit.dH/1000).toFixed(1),    '± '+(fit.dH_err/1000).toFixed(1), 'kJ/mol'),
+  //    card('ΔS°',                        (fit.dS/4.184).toFixed(1),   '',                                'cal/(mol·K)'),
+  //    card('ΔG°<sub>25</sub>',           (fit.dG_25/1000).toFixed(2), '',                                'kJ/mol'),
+  //    card('RMSE',                       fit.rmse.toExponential(2),   '',                                ''),
+  //    card('T<sub>m</sub> (derivative)', r.derivative.Tm_deriv.toFixed(2),'',                            '°C'),
+  //  ].join('');
+  //}
+}
+
+function card(label,value,err,unit){
+  return `<div class="bg-surface rounded-xl border border-border shadow-sm p-4">
+    <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">${label}</div>
+    <div class="text-xl font-semibold font-mono leading-tight">${value} <span class="text-sm font-normal text-muted">${unit}</span></div>
+    ${err?`<div class="text-xs font-mono text-muted mt-0.5">${err}</div>`:''}
+  </div>`;
+}
+
+// ── Van't Hoff ────────────────────────────────────────────────────────────────
+function accumulateVhoff(point, Tm_C) {
+  const key=(point.CT*1e6).toFixed(3);
+  vhoffPoints=vhoffPoints.filter(p=>(p.CT*1e6).toFixed(3)!==key);
+  vhoffPoints.push({...point,Tm_C});
+  vhoffPoints.sort((a,b)=>a.CT-b.CT);
+  renderVhoff();
+}
+
+function renderVhoff() {
+  if (!vhoffPoints.length) return;
+  document.getElementById('vhoffSection').classList.remove('hidden');
+  document.getElementById('vhoffTableBody').innerHTML=vhoffPoints.map((p,i)=>`
+    <tr>
+      <td>${(p.CT*1e6).toFixed(3)}</td><td>${p.Tm_C.toFixed(2)}</td>
+      <td>${p.inv_Tm.toExponential(5)}</td><td>${p.ln_CT.toFixed(4)}</td>
+      <td><button onclick="removeVhoff(${i})" class="text-muted hover:text-red-500 font-mono text-xs px-1">✕</button></td>
+    </tr>`).join('');
+  rebuildChart('chartVhoff',{
+    type:'scatter', data:{datasets:[{
+      label:'1/Tm vs ln[CT]',
+      data:vhoffPoints.map(p=>({x:p.ln_CT,y:p.inv_Tm})),
+      pointRadius:5, pointBackgroundColor:'#1a6b4a', showLine:false
+    }]},
+    options:scatterOpts('ln[CT]','1/Tm (K⁻¹)')
+  });
+  const reg=document.getElementById('vhoffReg');
+  if (vhoffPoints.length>=3) {
+    const {slope,intercept,r2}=linReg(vhoffPoints.map(p=>p.ln_CT),vhoffPoints.map(p=>p.inv_Tm));
+    const dH=8.314/slope, dS=intercept*dH;
+    reg.classList.remove('hidden');
+    document.getElementById('vhoffRegValues').innerHTML=`
+      <div><div class="text-xs text-muted">ΔH° (van't Hoff)</div><div class="font-medium">${(dH/1000).toFixed(1)} kJ/mol</div></div>
+      <div><div class="text-xs text-muted">ΔS°</div><div class="font-medium">${(dS/4.184).toFixed(1)} cal/(mol·K)</div></div>
+      <div><div class="text-xs text-muted">R²</div><div class="font-medium">${r2.toFixed(4)}</div></div>
+      <div><div class="text-xs text-muted">n points</div><div class="font-medium">${vhoffPoints.length}</div></div>`;
+  } else reg.classList.add('hidden');
+}
+
+window.removeVhoff=function(i){
+  vhoffPoints.splice(i,1);
+  if(!vhoffPoints.length) document.getElementById('vhoffSection').classList.add('hidden');
+  else renderVhoff();
+};
+
+// ── Download ──────────────────────────────────────────────────────────────────
+document.getElementById('downloadBtn').addEventListener('click',()=>{
+  if (!lastResult?.fit?.success) return;
+  const f=lastResult.fit;
+  let csv='Parameter,Value,Error,Unit\n';
+  csv+=`Tm,${f.Tm.toFixed(4)},${f.Tm_err.toFixed(4)},°C\n`;
+  csv+=`dH,${(f.dH/1000).toFixed(3)},${(f.dH_err/1000).toFixed(3)},kJ/mol\n`;
+  csv+=`dS,${(f.dS/4.184).toFixed(3)},,cal/(mol·K)\n`;
+  csv+=`dG_25,${(f.dG_25/1000).toFixed(4)},,kJ/mol\n`;
+  csv+=`RMSE,${f.rmse.toExponential(4)},,\n\nT_raw,S_raw,S_fit,lower_bl,upper_bl,alpha_obs\n`;
+  for (let i=0;i<lastResult.T_raw.length;i++) {
+    const T=lastResult.T_raw[i];
+    csv+=`${T},${lastResult.S_raw[i]},${interp(T,f.T_curve,f.S_curve)},${f.lower_bl[i]??''},${f.upper_bl[i]??''},${f.alpha_obs[i]??''}\n`;
+  }
+  if (vhoffPoints.length){
+    csv+='\nCT_uM,Tm_C,inv_Tm,ln_CT\n';
+    vhoffPoints.forEach(p=>csv+=`${(p.CT*1e6).toFixed(4)},${p.Tm_C.toFixed(4)},${p.inv_Tm},${p.ln_CT}\n`);
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='rna_melt_results.csv'; a.click();
+});
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  dfLoaded=false; lastResult=null; vhoffPoints=[];
+  document.getElementById('uploadSection').style.display='';
+  document.getElementById('resultsSection').classList.add('hidden');
+  document.getElementById('fileInput').value='';
+  document.getElementById('runBtn').disabled=true;
+  document.getElementById('autoBtn').disabled=true;
+  ['T_low','T_high','CT','saltConc'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('bl_lower_offset').value='10';
+  document.getElementById('bl_upper_offset').value='10';
+  //document.getElementById('fixBaselines').checked=false;
+  document.getElementById('vhoffSection').classList.add('hidden');
+  Object.values(charts).forEach(c=>c?.destroy());
+  hideError(); hideRunning();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function collectParams() {
+  const g=id=>{ const v=document.getElementById(id).value; return v===''?null:parseFloat(v); };
+  const params={
+    signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
+    structure_type:  document.querySelector('input[name="structType"]:checked')?.value  || 'monomer',
+    column:          document.getElementById('colSelect').value || null,
+    //fix_baselines:   document.getElementById('fixBaselines').checked,
+    bl_lower_offset: g('bl_lower_offset') ?? 10,
+    bl_upper_offset: g('bl_upper_offset') ?? 10,
+  };
+  if (g('T_low')    !== null) params.T_low   = g('T_low');
+  if (g('T_high')   !== null) params.T_high  = g('T_high');
+  if (g('saltConc') !== null) params.salt_mM = g('saltConc');
+  if (g('CT') !== null) params.CT = g('CT');
+  // const ct=g('CT');
+  // if (ct!==null && ct>0) params.CT=ct*1e-6;
+  return params;
+}
+
+function setIfEmpty(id,v){ const el=document.getElementById(id); if(!el.value) el.value=v; }
+
+function rebuildChart(id,config){
+  if(charts[id]) charts[id].destroy();
+  const ctx=document.getElementById(id)?.getContext('2d');
+  if(ctx) charts[id]=new Chart(ctx,config);
+}
+
+function scatterOpts(xLabel,yLabel,extra={}){
+  return {
+    responsive:true, animation:{duration:300},
+    plugins:{legend:{display:false},...(extra.plugins||{})},
+    scales:{
+      x:{title:{display:true,text:xLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
+      y:{title:{display:true,text:yLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
+    },...extra,
+  };
+}
+
+function zip(xs,ys){ return xs.map((x,i)=>({x,y:ys[i]})); }
+
+function interp(x,xs,ys){
+  let best=0,bd=Infinity;
+  for(let i=0;i<xs.length;i++){const d=Math.abs(xs[i]-x);if(d<bd){bd=d;best=i;}}
+  return ys[best];
+}
+
+function linReg(xs,ys){
+  const n=xs.length,mx=xs.reduce((a,b)=>a+b)/n,my=ys.reduce((a,b)=>a+b)/n;
+  let num=0,den=0;
+  for(let i=0;i<n;i++){num+=(xs[i]-mx)*(ys[i]-my);den+=(xs[i]-mx)**2;}
+  const slope=num/den,intercept=my-slope*mx;
+  const yhat=xs.map(x=>slope*x+intercept);
+  const ssTot=ys.reduce((a,y)=>a+(y-my)**2,0);
+  const ssRes=ys.reduce((a,y,i)=>a+(y-yhat[i])**2,0);
+  return {slope,intercept,r2:1-ssRes/ssTot};
+}
+
+function setStatus(state,text){
+  const dot=document.getElementById('statusDot');
+  const cls={loading:'bg-yellow-400 pulse',ready:'bg-accent',running:'bg-blue-400 pulse-fast',error:'bg-red-400'};
+  dot.className=`w-2 h-2 rounded-full shrink-0 ${cls[state]||'bg-muted'}`;
+  document.getElementById('statusText').textContent=text;
+}
+function showRunning(msg){
+  const b=document.getElementById('runningBanner');
+  b.classList.remove('hidden'); b.classList.add('flex');
+  document.getElementById('runningText').textContent=msg;
+}
+function hideRunning(){
+  const b=document.getElementById('runningBanner');
+  b.classList.add('hidden'); b.classList.remove('flex');
+}
+function showError(msg){ const b=document.getElementById('errorBanner'); b.textContent='⚠ '+msg; b.classList.remove('hidden'); }
+function hideError(){ document.getElementById('errorBanner').classList.add('hidden'); }
+
+boot();
+</script>
+</body>
+</html>
