@@ -3,6 +3,7 @@ from functools import reduce
 import numpy as np
 from scipy.optimize import least_squares
 
+#import constants
 from analysis import constants
 
 def res_diff(vs):

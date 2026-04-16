@@ -150,7 +150,7 @@ tailwind.config = {
     <div class="grid grid-cols-2 gap-2">
       <div>
         <label class="text-xs font-medium block mb-1">Oligo C<sub>T</sub> <span class="font-mono font-normal text-muted">µM</span></label>
-        <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="e.g. 5.0">
+        <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="e.g. 0.5">
       </div>
       <div>
         <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
@@ -442,7 +442,7 @@ _params = json.loads(_params_json)
 json.dumps(_am.run(_df_global, _params))
 `);
     const result = JSON.parse(raw);
-    console.log(JSON.stringify(result, null, 2));
+    // console.log(JSON.stringify(result, null, 2));
     lastResult = result;
     if (result.error) showError(result.error);
     else {
@@ -471,8 +471,8 @@ function renderResults(r) {
   rebuildChart('chartMelt',{
     type:'scatter', data:{datasets:[
       {label:'Raw data',       data:zip(r.T_raw,r.raw_data), pointRadius:3, pointBackgroundColor:'#aac', borderColor:'#aac', showLine:false},
-      //{label:'Two-state fit',  data:fit?.success?zip(r.fit.T_curve,r.fit.S_curve):[], borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
-      //{label:'Lower baseline', data:fit?.success?zip(r.T_raw,r.fit.lower_bl):[], borderColor:'#e67e22', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
+      {label:'Two-state fit',  data:zip(r.T_used,r.fit), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
+      // {label:'Lower baseline', data:zip(r.T_raw,r.fit.lower_bl):[], borderColor:'#e67e22', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
       //{label:'Upper baseline', data:fit?.success?zip(r.T_raw,r.fit.upper_bl):[], borderColor:'#2471a3', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
     ]},
     options:scatterOpts('Temperature (°C)', sigLabel,{plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}}})

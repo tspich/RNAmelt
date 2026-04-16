@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import least_squares
 
+#import functions, constants
 from analysis import functions, constants
 
 baseline_unbound_minT = 70
@@ -107,7 +108,9 @@ def vantHoff(T,
 
     return T_m, dG_37, dH, dS, t1, K, xdata, ydata, res_lsq.x
 
-def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init = None, b2_init = None, lin_init = 20, max_v=np.inf):
+def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2,
+                      b1_init = None, b2_init = None, lin_init = 10,
+                      max_v=np.inf):
     xdata = np.array(T)
     ydata = np.array(d)
 
@@ -155,7 +158,10 @@ def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init =
     else:
         raise ValueError("The least square didn't converge")
 
-def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_inits = None, b2_inits = None, lin_init = 20, max_v=np.inf, residuals_method='square'):
+def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100,
+                            dS_init = -0.2, b1_inits = None, b2_inits = None,
+                            lin_init = 20, max_v=np.inf,
+                            residuals_method='square'):
     xdata = np.array(T)
     ydata = ds #np.array(d)
 
