@@ -463,55 +463,27 @@ document.getElementById('autoBtn').addEventListener('click', () => {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderResults(r) {
-  const fit = r.fit;
-  const sigLabel   = r.signal_type==='fluorescence' ? 'Fluorescence' : 'Absorbance';
-  const derivLabel = r.signal_type==='fluorescence' ? 'dF/dT' : 'dA/dT';
+  const fit = r.fit_result;
+  // r.TmRaw for raw Tm, fit.T_m_fit for fitted Tm
+  const sigLabel   = 'Fluorescence'; // signal_type not in result
+  const derivLabel = 'dF/dT';
   document.getElementById('derivTitle').textContent = `${derivLabel} derivative · Tm estimate`;
 
+  // Use fit array for plotting if available
+  const fitData = fit?.fit || [];
   rebuildChart('chartMelt',{
     type:'scatter', data:{datasets:[
-      {label:'Raw data',       data:zip(r.T_raw,r.raw_data), pointRadius:3, pointBackgroundColor:'#aac', borderColor:'#aac', showLine:false},
-      {label:'Two-state fit',  data:zip(r.T_used,r.fit), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
-      // {label:'Lower baseline', data:zip(r.T_raw,r.fit.lower_bl):[], borderColor:'#e67e22', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
-      //{label:'Upper baseline', data:fit?.success?zip(r.T_raw,r.fit.upper_bl):[], borderColor:'#2471a3', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
+      {label:'Two-state fit',  data:zip(r.T_used,fitData), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
     ]},
     options:scatterOpts('Temperature (°C)', sigLabel,{plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}}})
   });
 
-  // if (fit?.success) {
-  //   rebuildChart('chartAlpha',{
-  //     type:'scatter', data:{datasets:[
-  //       {label:'Observed α', data:zip(r.fit.alpha_obs_T,r.fit.alpha_obs), pointRadius:3, pointBackgroundColor:'#7d3c98', showLine:false},
-  //       {label:'Model α',    data:zip(r.fit.alpha_fit_T,r.fit.alpha_fit), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
-  //     ]},
-  //     options:scatterOpts('Temperature (°C)','Fraction unfolded α')
-  //   });
-  //   rebuildChart('chartResiduals',{
-  //     type:'scatter', data:{datasets:[
-  //       {label:'Residual', data:zip(r.fit.residual_T,r.fit.residuals), pointRadius:3, pointBackgroundColor:'#888', showLine:false},
-  //     ]},
-  //     options:scatterOpts('Temperature (°C)','Residual (obs − fit)')
-  //   });
-  // }
-
   rebuildChart('chartDeriv',{
     type:'scatter', data:{datasets:[
-      {label:derivLabel, data:zip(r.T_raw,r.derivative), borderColor:'#c0392b', borderWidth:1.5, pointRadius:0, showLine:true, tension:.3},
+      {label:derivLabel, data:zip(r.T_used,fit?.derivative||[]), borderColor:'#c0392b', borderWidth:1.5, pointRadius:0, showLine:true, tension:.3},
     ]},
     options:scatterOpts('Temperature (°C)', derivLabel)
   });
-
-  //if (fit?.success) {
-  //  document.getElementById('fitResults').classList.remove('hidden');
-  //  document.getElementById('resultsGrid').innerHTML = [
-  //    card('T<sub>m</sub>',              fit.Tm.toFixed(2),           '± '+fit.Tm_err.toFixed(2),        '°C'),
-  //    card('ΔH°',                        (fit.dH/1000).toFixed(1),    '± '+(fit.dH_err/1000).toFixed(1), 'kJ/mol'),
-  //    card('ΔS°',                        (fit.dS/4.184).toFixed(1),   '',                                'cal/(mol·K)'),
-  //    card('ΔG°<sub>25</sub>',           (fit.dG_25/1000).toFixed(2), '',                                'kJ/mol'),
-  //    card('RMSE',                       fit.rmse.toExponential(2),   '',                                ''),
-  //    card('T<sub>m</sub> (derivative)', r.derivative.Tm_deriv.toFixed(2),'',                            '°C'),
-  //  ].join('');
-  //}
 }
 
 function card(label,value,err,unit){
@@ -569,17 +541,23 @@ window.removeVhoff=function(i){
 
 // ── Download ──────────────────────────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click',()=>{
-  if (!lastResult?.fit?.success) return;
-  const f=lastResult.fit;
-  let csv='Parameter,Value,Error,Unit\n';
-  csv+=`Tm,${f.Tm.toFixed(4)},${f.Tm_err.toFixed(4)},°C\n`;
-  csv+=`dH,${(f.dH/1000).toFixed(3)},${(f.dH_err/1000).toFixed(3)},kJ/mol\n`;
-  csv+=`dS,${(f.dS/4.184).toFixed(3)},,cal/(mol·K)\n`;
-  csv+=`dG_25,${(f.dG_25/1000).toFixed(4)},,kJ/mol\n`;
-  csv+=`RMSE,${f.rmse.toExponential(4)},,\n\nT_raw,S_raw,S_fit,lower_bl,upper_bl,alpha_obs\n`;
-  for (let i=0;i<lastResult.T_raw.length;i++) {
-    const T=lastResult.T_raw[i];
-    csv+=`${T},${lastResult.S_raw[i]},${interp(T,f.T_curve,f.S_curve)},${f.lower_bl[i]??''},${f.upper_bl[i]??''},${f.alpha_obs[i]??''}\n`;
+  if (!lastResult?.fit_result?.success) return;
+  const f=lastResult.fit_result;
+  let csv='Parameter,Value,Unit\n';
+  csv+=`Tm,${f.T_m_fit?.toFixed(4)??''},°C\n`;
+  csv+=`dH,${(f.dH/1000).toFixed(3)},kJ/mol\n`;
+  csv+=`dS,${(f.dS/4.184).toFixed(3)},cal/(mol·K)\n`;
+  csv+=`dG,${f.dG?.toFixed(4)??''},kJ/mol\n`;
+  csv+=`TmRaw,${lastResult.TmRaw?.toFixed(4)??''},°C\n`;
+  if (lastResult.vantHoff?.success) {
+    csv+=`\n# van't Hoff\n`;
+    csv+=`dH_vH,${(lastResult.vantHoff.dH/1000).toFixed(3)},kJ/mol\n`;
+    csv+=`dS_vH,${(lastResult.vantHoff.dS/4.184).toFixed(3)},cal/(mol·K)\n`;
+    csv+=`Tm_vH,${lastResult.vantHoff.T_m_vH?.toFixed(4)??''},°C\n`;
+  }
+  csv+=`\nT,Signal,Fit\n`;
+  for (let i=0;i<lastResult.T_used?.length;i++) {
+    csv+=`${lastResult.T_used[i]},${lastResult.T_used[i]},${f.fit?.[i]??''}\n`;
   }
   if (vhoffPoints.length){
     csv+='\nCT_uM,Tm_C,inv_Tm,ln_CT\n';
