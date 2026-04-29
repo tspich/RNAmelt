@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.optimize import least_squares
+from scipy import stats
 
 #import functions, constants
 from analysis import functions, constants
@@ -170,6 +171,62 @@ def vantHoff(T,
 
     elif structType == 'monomer':
         raise ValueError("Van't Hoff analysis not possible for monomere!")
+
+def vant_hoff_concentration(
+    tm_values,
+    concentrations,
+    self_complementary: bool = False,
+) -> dict:
+    """Linear-regression van't Hoff fit of 1/Tm vs ln(C_T/f) → ΔH, ΔS, ΔG(37°C)."""
+    tm = np.asarray(tm_values, dtype=float)
+    ct = np.asarray(concentrations, dtype=float)
+
+    if tm.shape != ct.shape:
+        raise ValueError(
+            f"tm_values and concentrations must have the same shape "
+            f"(got {tm.shape} and {ct.shape})"
+        )
+    if tm.ndim != 1:
+        raise ValueError("tm_values and concentrations must be 1-D")
+    if tm.size < 2:
+        raise ValueError("Need at least 2 (Tm, C_T) points for regression")
+    if np.any(~np.isfinite(tm)) or np.any(tm <= 0):
+        raise ValueError("Tm values must be finite and > 0 (Kelvin)")
+    if np.any(~np.isfinite(ct)) or np.any(ct <= 0):
+        raise ValueError("Concentrations must be finite and > 0 (Molar)")
+
+    f = 1.0 if self_complementary else 4.0
+    ln_ct = np.log(ct / f)
+    inv_tm = 1.0 / tm
+
+    if np.allclose(ln_ct, ln_ct[0]):
+        raise ValueError(
+            "All concentrations are identical — cannot fit slope of "
+            "1/Tm vs ln(C_T)"
+        )
+
+    slope, intercept, r, _, _ = stats.linregress(ln_ct, inv_tm)
+
+    if slope == 0:
+        raise ValueError("Regression slope is zero; cannot derive ΔH")
+
+    dH = constants.R / slope
+    dS = intercept * dH
+    dG_37 = dH - (37.0 - constants.T0) * dS
+
+    return {
+        "dH":             float(dH),
+        "dS":             float(dS),
+        "dG_37":          float(dG_37),
+        "r_squared":      float(r ** 2),
+        "slope":          float(slope),
+        "intercept":      float(intercept),
+        "ln_ct":          ln_ct,
+        "inv_tm":         inv_tm,
+        "tm_values":      tm,
+        "concentrations": ct,
+        "self_complementary": bool(self_complementary),
+    }
 
 def fit_full_function(
     T,
