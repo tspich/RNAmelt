@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import least_squares
 
+#import functions, constants
 from analysis import functions, constants
 
 baseline_unbound_minT = 70
@@ -63,51 +64,125 @@ def vantHoff(T,
              T_scale = 1000.,
              duplex = True,
              t1_min = -1,
-             t1_max = -1):
-    # normalize signal to obtain fraction of folded
-    f_folded  = [ (dd - functions.linear(T[i], m_unbound, b_unbound)) / (functions.linear(T[i], m_bound, b_bound) - functions.linear(T[i], m_unbound, b_unbound)) for i, dd in enumerate(signal) ]
+             t1_max = -1,
+             structType = 'heterodimer'):
+    if structType == 'heterodimer':
+        # normalize signal to obtain fraction of folded
+        f_folded = [
+            (dd - functions.linear(T[i], m_unbound, b_unbound))
+            / (
+                functions.linear(T[i], m_bound, b_bound)
+                - functions.linear(T[i], m_unbound, b_unbound)
+            )
+            for i, dd in enumerate(signal)
+        ]
 
-    K         = [ np.log(2 * ff / (c0 * ((1. - ff) ** 2))) if ff <= (1 - border) and ff >= border else None for ff in f_folded ]
-    t1        = [ T_scale / (t - constants.T0) for t in T ]
-    
+        K = [
+            np.log(2 * ff / (c0 * ((1.0 - ff) ** 2)))
+            if ff <= (1 - border) and ff >= border
+            else None
+            for ff in f_folded
+        ]
 
-    lnK = []
-    tt  = []
+        t1 = [ T_scale / (t - constants.T0) for t in T ]
 
-    # compile actual data without None values
-    for i in range(0, len(K)):
-        if K[i] != None:
-            tt.append(t1[i])
-            lnK.append(K[i])
 
-    if t1_min == -1:
-        t1_min = len(t1)
-    else:
-        t1_min = next(i for i,v in enumerate(tt) if v < t1_min)
+        lnK = []
+        tt  = []
 
-    if t1_max == -1:
-        t1_max = 0
-    else:
-        t1_max = next(i for i,v in enumerate(tt) if v <= t1_max)
+        # compile actual data without None values
+        for i in range(0, len(K)):
+            if K[i] != None:
+                tt.append(t1[i])
+                lnK.append(K[i])
 
-    xdata = np.array(tt[t1_max:t1_min])
-    ydata = np.array(lnK[t1_max:t1_min])
+        if t1_min == -1:
+            t1_min = len(t1)
+        else:
+            t1_min = next(i for i,v in enumerate(tt) if v < t1_min)
 
-    res_lsq = least_squares(functions.linear_res,
-                            [1, 1],
-                            args=(xdata, ydata))
+        if t1_max == -1:
+            t1_max = 0
+        else:
+            t1_max = next(i for i,v in enumerate(tt) if v <= t1_max)
 
-    t_m = (np.log(4 / c0) - res_lsq.x[1]) / res_lsq.x[0]
-    T_m = T_scale / t_m + constants.T0
-    dH  = -res_lsq.x[0] * constants.R * T_scale
-    dG_Tm = constants.R * (T_m - constants.T0) * np.log(4 / c0) + dH
+        xdata = np.array(tt[t1_max:t1_min])
+        ydata = np.array(lnK[t1_max:t1_min])
 
-    dS    = dH / (T_m - constants.T0) + constants.R * np.log(4 / c0)
-    dG_37 = dH - (37. - constants.T0) * dS
+        res_lsq = least_squares(functions.linear_res,
+                                [1, 1],
+                                args=(xdata, ydata))
 
-    return T_m, dG_37, dH, dS, t1, K, xdata, ydata, res_lsq.x
+        t_m = (np.log(4 / c0) - res_lsq.x[1]) / res_lsq.x[0]
+        T_m = T_scale / t_m + constants.T0
+        dH  = -res_lsq.x[0] * constants.R * T_scale
+        dG_Tm = constants.R * (T_m - constants.T0) * np.log(4 / c0) + dH
 
-def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init = None, b2_init = None, lin_init = 20, max_v=np.inf):
+        dS    = dH / (T_m - constants.T0) + constants.R * np.log(4 / c0)
+        dG_37 = dH - (37. - constants.T0) * dS
+
+        return T_m, dG_37, dH, dS, t1, K, xdata, ydata, res_lsq.x
+
+    elif structType == 'homodimer':
+        # normalize signal to obtain fraction of folded
+        f_folded  = [ (dd - functions.linear(T[i], m_unbound, b_unbound)) / (functions.linear(T[i], m_bound, b_bound) - functions.linear(T[i], m_unbound, b_unbound)) for i, dd in enumerate(signal) ]
+
+        K         = [ np.log(2 * ff / (c0 * ((1. - ff) ** 2))) if ff <= (1 - border) and ff >= border else None for ff in f_folded ]
+        t1        = [ T_scale / (t - constants.T0) for t in T ]
+
+
+        lnK = []
+        tt  = []
+
+        # compile actual data without None values
+        for i in range(0, len(K)):
+            if K[i] != None:
+                tt.append(t1[i])
+                lnK.append(K[i])
+
+        if t1_min == -1:
+            t1_min = len(t1)
+        else:
+            t1_min = next(i for i,v in enumerate(tt) if v < t1_min)
+
+        if t1_max == -1:
+            t1_max = 0
+        else:
+            t1_max = next(i for i,v in enumerate(tt) if v <= t1_max)
+
+        xdata = np.array(tt[t1_max:t1_min])
+        ydata = np.array(lnK[t1_max:t1_min])
+
+        res_lsq = least_squares(functions.linear_res,
+                                [1, 1],
+                                args=(xdata, ydata))
+
+        t_m = (np.log(1 / c0) - res_lsq.x[1]) / res_lsq.x[0]
+        T_m = T_scale / t_m + constants.T0
+        dH  = -res_lsq.x[0] * constants.R * T_scale
+        dG_Tm = constants.R * (T_m - constants.T0) * np.log(1 / c0) + dH
+
+        dS    = dH / (T_m - constants.T0) + constants.R * np.log(1 / c0)
+        dG_37 = dH - (37. - constants.T0) * dS
+
+        return T_m, dG_37, dH, dS, t1, K, xdata, ydata, res_lsq.x
+
+
+    elif structType == 'monomer':
+        raise ValueError("Van't Hoff analysis not possible for monomere!")
+
+def fit_full_function(
+    T,
+    d,
+    c0=1e-6,
+    dH_init=-100,
+    dS_init=-0.2,
+    b1_init=None,
+    b2_init=None,
+    lin_init=10,
+    max_v=np.inf,
+    structType="heterodimer",
+):
     xdata = np.array(T)
     ydata = np.array(d)
 
@@ -121,7 +196,7 @@ def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init =
 
     x_init = np.array([ dH_init, dS_init, *b1_init, *b2_init]) # dH, dS, m1, b1, m2, b2
 
-    bounds = ([ -150, -5,       0, -np.inf, 0,      -np.inf ],
+    bounds = ([ -200, -5,       0, -np.inf, 0,      -np.inf ],
               [0,      0,  np.inf,  np.inf, np.inf, max_v])
 
     scales  = [1., 0.01, 1., 100., 1., 100.]
@@ -129,7 +204,7 @@ def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init =
     res_lsq = least_squares(functions.full_function_res,
                             x_init,
                             bounds = bounds,
-                            max_nfev = 1e12,
+                            max_nfev = 10000,
                             gtol = 1e-8,
                             ftol = 1e-8,
                             x_scale = scales,
@@ -139,7 +214,8 @@ def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init =
 #                            method = "dogbox",
 #                            verbose = 2,
                             args = (xdata, ydata),
-                            kwargs = { 'c0': c0 })
+                            kwargs = { 'c0': c0,
+                                       'structType': structType})
 
     if res_lsq.success>0:
         dG_37 = res_lsq.x[0] - (37 - constants.T0) * res_lsq.x[1]
@@ -155,7 +231,21 @@ def fit_full_function(T, d, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_init =
     else:
         raise ValueError("The least square didn't converge")
 
-def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100, dS_init = -0.2, b1_inits = None, b2_inits = None, lin_init = 20, max_v=np.inf, residuals_method='square'):
+def fit_full_function_multi(
+    T,
+    ds,
+    cs=None,
+    c0=1e-6,
+    dH_init=-100,
+    dS_init=-0.2,
+    b1_inits=None,
+    b2_inits=None,
+    lin_init=20,
+    max_v=np.inf,
+    residuals_method="square",
+    structType="heterodimer",
+):
+
     xdata = np.array(T)
     ydata = ds #np.array(d)
 
@@ -195,7 +285,7 @@ def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100, dS_init
     res_lsq = least_squares(functions.full_function_multi_res,
                             x_init,
                             bounds = bounds,
-                            max_nfev = 1e12,
+                            max_nfev = 10000,
                             gtol = 1e-8,
                             ftol = 1e-8,
                             x_scale = scales,
@@ -208,7 +298,8 @@ def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100, dS_init
                             kwargs = { 'cs': cs,
                                        'c0': c0,
 #                                      'res_func': res_diff_square }) # use squared difference for residuals
-                                       'res_func': res_diff_fun })
+                                       'res_func': res_diff_fun,
+                                       'structType': structType})
 
     if res_lsq.success>0:
         dH, dS = res_lsq.x[0], res_lsq.x[1]
@@ -234,31 +325,31 @@ def fit_full_function_multi(T, ds, cs = None, c0 = 1e-6, dH_init = -100, dS_init
     else:
         raise ValueError("The least square didn't converge")
 
-def conc_dep(xdata, ydata, T_scale=1000.):
-    x_init = [0, 0]
-    bounds = ([-1e-1, -np.inf], [0, np.inf])
-
-    sol = []
-
-    min_y, max_y = 100, -1
-
-    for i, ys in enumerate(ydata):
-        res_lsq = least_squares(linear_res,
-                                x_init,
-                                bounds = bounds,
-                                max_nfev = 1e10,
-                                gtol = 1e-14,
-                                ftol = 1e-14,
-                                args=(xdata, ys))
-
-        dH = (R * T_scale) / res_lsq.x[0]
-
-        T_m   = T_scale / linear(np.log(1e-6), *res_lsq.x) + T0
-        dS    = dH / (T_m - T0) + R * np.log(4/1e-6)
-        dG_37 = dH - (37. - T0) * dS
-
-        sol = sol + [T_m, dG_37, dH, dS]
-    return sol
+#def conc_dep(xdata, ydata, T_scale=1000.):
+#    x_init = [0, 0]
+#    bounds = ([-1e-1, -np.inf], [0, np.inf])
+#
+#    sol = []
+#
+#    min_y, max_y = 100, -1
+#
+#    for i, ys in enumerate(ydata):
+#        res_lsq = least_squares(linear_res,
+#                                x_init,
+#                                bounds = bounds,
+#                                max_nfev = 1e10,
+#                                gtol = 1e-14,
+#                                ftol = 1e-14,
+#                                args=(xdata, ys))
+#
+#        dH = (R * T_scale) / res_lsq.x[0]
+#
+#        T_m   = T_scale / linear(np.log(1e-6), *res_lsq.x) + T0
+#        dS    = dH / (T_m - T0) + R * np.log(4/1e-6)
+#        dG_37 = dH - (37. - T0) * dS
+#
+#        sol = sol + [T_m, dG_37, dH, dS]
+#    return sol
 
 #def concentration_dependency(r_raw, r_VH, r_fit, T_scale = 1000.):
 #    results = {}

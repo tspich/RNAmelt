@@ -3,6 +3,7 @@ from functools import reduce
 import numpy as np
 from scipy.optimize import least_squares
 
+#import constants
 from analysis import constants
 
 def res_diff(vs):
@@ -73,15 +74,21 @@ def intersect_lin(m, b, xs, ys, border = 10, min_value = 0, max_value = 10000):
 
     return x, y
 
-def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6):
-    theta = theta_from_therm(T, dH, dS, c0)
+def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, structType='heterodimer'):
+    if structType == 'heterodimer':
+        theta = theta_from_therm(T, dH, dS, c0)
+    elif structType == 'homodimer':
+        theta = theta_from_therm_homo(T, dH, dS, c0)
+    elif structType == 'monomer':
+        theta = theta_from_therm_mono(T, dH, dS, c0)
     return theta * (m1 * T + b1) + (1 - theta) * (m2 * T + b2)
 
-def full_function_res(x, T, y, c0 = 1e-6):
-    return y - full_function(T, *x, c0)
+def full_function_res(x, T, y, c0 = 1e-6, structType = 'heterodimer'):
+    return y - full_function(T, *x, c0, structType)
 
 def full_function_multi(T, *args, **kwargs):
     default_c0 = 1e-6
+    default_structType = 'hetero'
     # prepare variables and constants
     f = []
     m1s = []
@@ -109,9 +116,16 @@ def full_function_multi(T, *args, **kwargs):
     if not cs:
         cs = default_cs
 
+    structType = kwargs.get('structType', default_structType)
     # compose result function fit
     for i, c in enumerate(cs):
-        theta = theta_from_therm(T, dH, dS, c)
+        if structType == 'heterodimer':
+            theta = theta_from_therm(T, dH, dS, c)
+        elif structType == 'homodimer':
+            theta = theta_from_therm_homo(T, dH, dS, c)
+        elif structType == 'monomer':
+            theta = theta_from_therm_mono(T, dH, dS, c)
+
         f.append(theta * (m1s[i] * T + b1s[i]) + (1 - theta) * (m2s[i] * T + b2s[i]))
 
     return f
@@ -133,3 +147,15 @@ def theta_from_therm(T, dH, dS, c0 = 1e-6):
 #    return term / (np.sqrt(2) + term)
     term = np.sqrt(2 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
     return (term - 1) / (term + 1)
+
+def theta_from_therm_homo(T, dH, dS, c0 = 1e-6):
+    tt    = T - constants.T0
+    dG    = dH - tt * dS
+    #term = (4*c0*np.exp(- dG / (constants.R * tt))+np.sqrt(8*c0*np.exp(- dG / (constants.R * tt))+1)+1)/(4*c0*np.exp(- dG / (constants.R * tt)))
+    term = np.sqrt(8 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
+    return (term - 1) / (term + 1)
+
+def theta_from_therm_mono(T, dH, dS, c0 = 1e-6):
+    tt    = T - constants.T0
+    dG    = dH - tt * dS
+    return np.exp(- dG / (constants.R * tt))/(1+np.exp(- dG / (constants.R * tt)))

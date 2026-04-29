@@ -79,6 +79,32 @@ tailwind.config = {
   }
   .sb-input:focus { border-color:var(--accent); }
 
+  .dual-range { position:relative; height:24px; }
+  .dual-range .dr-track {
+    position:absolute; left:0; right:0; top:11px; height:3px;
+    background:var(--border); border-radius:2px;
+  }
+  .dual-range .dr-fill {
+    position:absolute; top:11px; height:3px; background:var(--accent); border-radius:2px;
+  }
+  .dual-range input[type=range] {
+    position:absolute; left:0; right:0; top:0; width:100%; height:24px;
+    -webkit-appearance:none; appearance:none; background:transparent; pointer-events:none; margin:0;
+  }
+  .dual-range input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none; pointer-events:auto;
+    width:14px; height:14px; border-radius:50%;
+    background:#fff; border:2px solid var(--accent);
+    cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.15);
+  }
+  .dual-range input[type=range]::-moz-range-thumb {
+    pointer-events:auto;
+    width:14px; height:14px; border-radius:50%;
+    background:#fff; border:2px solid var(--accent);
+    cursor:pointer;
+  }
+  .dual-range input[type=range]::-moz-range-track { background:transparent; }
+
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
   .pulse { animation:pulse 1s infinite; }
   .pulse-fast { animation:pulse .7s infinite; }
@@ -108,7 +134,7 @@ tailwind.config = {
 <div class="flex min-h-screen">
 
 <!-- ════════════════════ SIDEBAR ════════════════════ -->
-<aside class="sidebar flex flex-col bg-surface border-r border-border sticky top-0 h-screen overflow-y-auto shrink-0" style="width:340px">
+<aside class="sidebar flex flex-col bg-surface border-r border-border sticky top-0 h-screen overflow-y-auto shrink-0" style="width:540px">
 
   <!-- Logo -->
   <div class="px-5 py-4 border-b border-border shrink-0">
@@ -120,6 +146,7 @@ tailwind.config = {
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Experiment</div>
 
+<!--
     <div class="mb-3">
       <div class="text-xs font-medium mb-1.5">Signal type</div>
       <div class="flex gap-1.5">
@@ -127,6 +154,7 @@ tailwind.config = {
         <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigFlu" value="fluorescence" checked><label for="sigFlu">Fluorescence</label></div>
       </div>
     </div>
+-->
 
     <div class="mb-3">
       <div class="text-xs font-medium mb-1.5">Structure type</div>
@@ -147,15 +175,26 @@ tailwind.config = {
   <!-- ② Concentrations -->
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Concentrations</div>
-    <div class="grid grid-cols-2 gap-2">
+    <div id="singleCTBlock" class="grid grid-cols-2 gap-2">
       <div>
         <label class="text-xs font-medium block mb-1">Oligo C<sub>T</sub> <span class="font-mono font-normal text-muted">µM</span></label>
-        <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="e.g. 5.0">
+        <input type="number" id="CT" class="sb-input" step="0.1" min="0" value="0.5">
       </div>
       <div>
         <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
-        <input type="number" id="saltConc" class="sb-input" step="1" min="0" placeholder="e.g. 150">
+        <input type="number" id="saltConc" class="sb-input" step="1" min="0" value="150">
       </div>
+    </div>
+    <div id="multiCTBlock" style="display:none">
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div></div>
+        <div>
+          <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
+          <input type="number" id="saltConcMulti" class="sb-input" step="1" min="0" value="150">
+        </div>
+      </div>
+      <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">Per-column C<sub>T</sub> (µM)</div>
+      <div id="multiCTGrid" class="grid grid-cols-2 gap-2"></div>
     </div>
     <div class="text-xs font-mono text-muted mt-2">C<sub>T</sub> also adds a point to the 1/T<sub>m</sub> vs ln[C<sub>T</sub>] plot</div>
   </div>
@@ -163,7 +202,7 @@ tailwind.config = {
   <!-- ③ Temperature window -->
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Temperature window <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
-    <div class="grid grid-cols-2 gap-2 mb-2">
+    <div class="grid grid-cols-2 gap-2 mb-3">
       <div>
         <label class="text-xs font-medium block mb-1">T<sub>low</sub></label>
         <input type="number" id="T_low" class="sb-input" step="0.5" placeholder="auto">
@@ -173,7 +212,13 @@ tailwind.config = {
         <input type="number" id="T_high" class="sb-input" step="0.5" placeholder="auto">
       </div>
     </div>
-    <div class="text-xs font-mono text-muted">Only this range is used for fitting</div>
+    <div id="tRangeSlider" class="dual-range" style="display:none">
+      <div class="dr-track"></div>
+      <div class="dr-fill" id="trFill"></div>
+      <input type="range" id="trMin" step="0.5">
+      <input type="range" id="trMax" step="0.5">
+    </div>
+    <div class="text-xs font-mono text-muted mt-2">Only this range is used for fitting</div>
   </div>
 
   <!-- ④ Baseline offsets -->
@@ -279,27 +324,17 @@ tailwind.config = {
 
       <div class="col-span-2 bg-surface rounded-xl border border-border shadow-sm p-5">
         <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Melting curve · raw + two-state fit + baselines</div>
-        <canvas id="chartMelt" style="max-height:280px"></canvas>
+        <canvas id="chartMelt" style="max-height:480px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Fraction unfolded α(T)</div>
-        <canvas id="chartAlpha"></canvas>
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+        <canvas id="chartAlpha" style="max-height:420px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
         <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">dA/dT derivative · Tm estimate</div>
-        <canvas id="chartDeriv"></canvas>
-      </div>
-
-      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Fit residuals</div>
-        <canvas id="chartResiduals"></canvas>
-      </div>
-
-      <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff · 1/Tm vs ln[CT]</div>
-        <canvas id="chartVhoff"></canvas>
+        <canvas id="chartDeriv" style="max-height:420px"></canvas>
       </div>
 
     </div>
@@ -308,6 +343,29 @@ tailwind.config = {
     <div id="fitResults" class="hidden mb-5">
       <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Fit results — two-state model</div>
       <div id="resultsGrid" class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(175px,1fr))"></div>
+    </div>
+
+    <!-- Per-column accumulated results -->
+    <div id="colResultsSection" class="hidden mb-5">
+      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Results per column</div>
+      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-x-auto">
+        <table class="w-full vhoff-table">
+          <thead><tr>
+            <th>Column</th>
+            <th>Tₘ raw (°C)</th>
+            <th>Tₘ vH (°C)</th>
+            <th>ΔH vH (kcal/mol)</th>
+            <th>ΔS vH (cal/mol·K)</th>
+            <th>ΔG₃₇ vH (kcal/mol)</th>
+            <th>Tₘ fit (°C)</th>
+            <th>ΔH fit (kcal/mol)</th>
+            <th>ΔS fit (cal/mol·K)</th>
+            <th>ΔG₃₇ fit (kcal/mol)</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="colResultsBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Van't Hoff multi-conc -->
@@ -348,6 +406,7 @@ const PYTHON_MODULES = [
 ];
 
 let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[];
+const colResults={};
 const charts={};
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -360,7 +419,7 @@ async function boot() {
     setStatus('loading','Loading modules…');
     pyodide.FS.mkdir('/analysis');
     for (const mod of PYTHON_MODULES) {
-      const res = await fetch(mod.path);
+      const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`Cannot fetch ${mod.path} — serve via: python -m http.server`);
       pyodide.FS.writeFile('/'+mod.path, await res.text());
     }
@@ -409,10 +468,15 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
     document.getElementById('fileMeta').textContent =
       `${info.rows} rows · T: ${info.T_min.toFixed(1)}–${info.T_max.toFixed(1)} °C · ${info.sig_cols.length} signal column(s)`;
     const sel = document.getElementById('colSelect');
-    sel.innerHTML = info.sig_cols.map(c=>`<option value="${c}">${c}</option>`).join('');
-    document.getElementById('colSection').style.display = info.sig_cols.length > 1 ? '' : 'none';
+    const cols = info.sig_cols;
+    const multiOpt = cols.length > 1 ? `<option value="__multi__">multi (all columns)</option>` : '';
+    sel.innerHTML = cols.map(c=>`<option value="${c}">${c}</option>`).join('') + multiOpt;
+    document.getElementById('colSection').style.display = cols.length > 1 ? '' : 'none';
+    buildMultiCTInputs(cols);
+    updateCTBlocks();
     setIfEmpty('T_low',  (info.T_min).toFixed(1));
     setIfEmpty('T_high', (info.T_max).toFixed(1));
+    initTRangeSlider(info.T_min, info.T_max);
     document.getElementById('uploadSection').style.display = 'none';
     document.getElementById('resultsSection').classList.remove('hidden');
     document.getElementById('runBtn').disabled  = false;
@@ -423,9 +487,26 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
-document.getElementById('colSelect').addEventListener('change', runAnalysis);
-document.querySelectorAll('input[name="signalType"]').forEach(r => r.addEventListener('change', ()=>{ if(dfLoaded) runAnalysis(); }));
-document.querySelectorAll('input[name="structType"]').forEach(r  => r.addEventListener('change', ()=>{ if(dfLoaded) runAnalysis(); }));
+document.getElementById('colSelect').addEventListener('change', () => {
+  updateCTBlocks();
+  runAnalysis();
+});
+
+function buildMultiCTInputs(cols) {
+  const grid = document.getElementById('multiCTGrid');
+  grid.innerHTML = cols.map(c => `
+    <div>
+      <label class="text-xs font-medium block mb-1 font-mono">${c}</label>
+      <input type="number" class="sb-input multi-ct" data-col="${c}" step="0.1" min="0" value="0.5">
+    </div>
+  `).join('');
+}
+
+function updateCTBlocks() {
+  const isMulti = document.getElementById('colSelect').value === '__multi__';
+  document.getElementById('singleCTBlock').style.display = isMulti ? 'none' : '';
+  document.getElementById('multiCTBlock').style.display  = isMulti ? ''     : 'none';
+}
 
 async function runAnalysis() {
   if (!dfLoaded) return;
@@ -434,15 +515,23 @@ async function runAnalysis() {
   document.getElementById('runBtn').disabled = true;
   const params = collectParams();
   try {
+    // Re-fetch Python modules so edits take effect without a page reload
+    for (const mod of PYTHON_MODULES) {
+      const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) pyodide.FS.writeFile('/'+mod.path, await res.text());
+    }
     pyodide.globals.set('_params_json', JSON.stringify(params));
     const raw = await pyodide.runPythonAsync(`
 import json, importlib
+import analysis.utils, analysis.methods, analysis.functions, analysis.cleaning
+importlib.reload(analysis.utils); importlib.reload(analysis.functions)
+importlib.reload(analysis.methods); importlib.reload(analysis.cleaning)
 import analysis.analysis_melting as _am; importlib.reload(_am)
 _params = json.loads(_params_json)
 json.dumps(_am.run(_df_global, _params))
 `);
     const result = JSON.parse(raw);
-    console.log(JSON.stringify(result, null, 2));
+    // console.log(JSON.stringify(result, null, 2));
     lastResult = result;
     if (result.error) showError(result.error);
     else {
@@ -455,6 +544,8 @@ json.dumps(_am.run(_df_global, _params))
 
 document.getElementById('autoBtn').addEventListener('click', () => {
   ['T_low','T_high'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('CT').value='0.5';
+  document.getElementById('saltConc').value='150';
   document.getElementById('bl_lower_offset').value='10';
   document.getElementById('bl_upper_offset').value='10';
   //document.getElementById('fixBaselines').checked=false;
@@ -463,56 +554,227 @@ document.getElementById('autoBtn').addEventListener('click', () => {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderResults(r) {
-  const fit = r.fit;
-  const sigLabel   = r.signal_type==='fluorescence' ? 'Fluorescence' : 'Absorbance';
-  const derivLabel = r.signal_type==='fluorescence' ? 'dF/dT' : 'dA/dT';
-  document.getElementById('derivTitle').textContent = `${derivLabel} derivative · Tm estimate`;
+  if (r.is_multi) return renderMultiResults(r);
+  const vh  = r.vantHoff;
+  const fit = r.fit_result;
+  const c0  = r.c0;
 
-  rebuildChart('chartMelt',{
-    type:'scatter', data:{datasets:[
-      {label:'Raw data',       data:zip(r.T_raw,r.raw_data), pointRadius:3, pointBackgroundColor:'#aac', borderColor:'#aac', showLine:false},
-      //{label:'Two-state fit',  data:fit?.success?zip(r.fit.T_curve,r.fit.S_curve):[], borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
-      //{label:'Lower baseline', data:fit?.success?zip(r.T_raw,r.fit.lower_bl):[], borderColor:'#e67e22', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
-      //{label:'Upper baseline', data:fit?.success?zip(r.T_raw,r.fit.upper_bl):[], borderColor:'#2471a3', borderWidth:1.5, borderDash:[5,4], pointRadius:0, showLine:true},
-    ]},
-    options:scatterOpts('Temperature (°C)', sigLabel,{plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}}})
+  // ── Melting curve: raw data + fit + baselines ─────────────────────────
+  const meltSets = [
+    {label: 'Raw data',
+      data: zip(r.T_all, r.signal_all),
+      borderColor: '#56B4E9',
+      borderWidth: 4,
+      pointRadius: 0, showLine: true, tension: 0},
+  ];
+  const blSrc = fit?.success ? {
+    b: fit.base_b_f,
+    ub: fit.base_ub_f} : (r.base_b_r ? {b: r.base_b_r, ub: r.base_ub_r} : null);
+  if (blSrc) {
+    const n = r.T_used.length, q = Math.floor(n / 4);
+    const [m1,b1] = blSrc.b, [m2,b2] = blSrc.ub;
+    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    meltSets.push(
+      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:'#aaa', ...blOpts},
+      {label:'Unfolded bl.', data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#aaa', ...blOpts},
+    );
+  }
+  if (fit?.success && Array.isArray(fit.fit) && fit.fit.length) {
+    const n = Math.min(r.T_used.length, fit.fit.length);
+    meltSets.push({
+      label: 'Two-state fit',
+      data: Array.from({length: n}, (_, i) => ({x: r.T_used[i], y: fit.fit[i]})),
+      borderColor: '#D55E00',
+      borderWidth: 2.5,
+      pointRadius: 0,
+      showLine: true,
+      spanGaps: true,
+      tension: 0,
+      order: -1,
+    });
+  }
+  meltRange.low  = r.T_used[0];
+  meltRange.high = r.T_used[r.T_used.length - 1];
+  rebuildChart('chartMelt', {
+    type:'scatter', data:{datasets:meltSets},
+    options:scatterOpts(
+      'Temperature (°C)',
+      'Fluorescence',
+      {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
+    ),
+    plugins:[analysisRangePlugin()],
   });
 
-  // if (fit?.success) {
-  //   rebuildChart('chartAlpha',{
-  //     type:'scatter', data:{datasets:[
-  //       {label:'Observed α', data:zip(r.fit.alpha_obs_T,r.fit.alpha_obs), pointRadius:3, pointBackgroundColor:'#7d3c98', showLine:false},
-  //       {label:'Model α',    data:zip(r.fit.alpha_fit_T,r.fit.alpha_fit), borderColor:'#1a6b4a', borderWidth:2, pointRadius:0, showLine:true, tension:.4},
-  //     ]},
-  //     options:scatterOpts('Temperature (°C)','Fraction unfolded α')
-  //   });
-  //   rebuildChart('chartResiduals',{
-  //     type:'scatter', data:{datasets:[
-  //       {label:'Residual', data:zip(r.fit.residual_T,r.fit.residuals), pointRadius:3, pointBackgroundColor:'#888', showLine:false},
-  //     ]},
-  //     options:scatterOpts('Temperature (°C)','Residual (obs − fit)')
-  //   });
-  // }
+  // ── Van't Hoff ln(Kₐ) vs 1000/T ──────────────────────────────────────
+  if (vh?.success) {
+    const lnKaTm   = Math.log(4 / c0);
+    const tm_x     = 1000 / (vh.T_m_vH + 273.15);
+    const [sl, ic] = vh.fit_vh;
+    const xL       = vh.xdata[0], xR = vh.xdata[vh.xdata.length - 1];
+    const validY   = vh.K.filter(v => v !== null);
+    const yBottom  = Math.min(...validY, lnKaTm) - 0.5;
+    const xAll     = vh.t1;
+    const xMin = Math.min(...xAll), xMax = Math.max(...xAll);
+    const yMin = Math.min(...validY, lnKaTm) - 0.5;
+    const yMax = Math.max(...validY, lnKaTm) + 0.5;
 
-  rebuildChart('chartDeriv',{
+    console.log({
+      tm_x, xMin, xMax, lnKaTm, yMin, yMax,
+      vh_T_m_vH: vh.T_m_vH, c0
+    });
+
+    rebuildChart('chartAlpha', {
+      type:'scatter', data:{datasets:[
+        {label: 'Linear fit', data: [{x: xL, y: sl * xL + ic}, {x: xR, y: sl * xR + ic}], borderColor: '#D55E00', borderWidth: 2.5, borderDash: [5, 3], pointRadius: 0, showLine: true},
+        {label: 'ln(Kₐ)', data: vh.t1.map((x, i) => ({x, y: vh.K[i]})), borderColor: '#56B4E9', borderWidth: 4, pointRadius: 0, showLine: true, tension: 0, spanGaps: false},
+        {label: 'Kₐ=4/C₀', data: [{x: xMin, y: lnKaTm}, {x: tm_x, y: lnKaTm}], borderColor: '#333', borderWidth: 2, borderDash: [2, 4], pointRadius: 0, showLine: true, order: -1},
+        {label: `Tₘ=${vh.T_m_vH.toFixed(1)}°C`, data: [{x: tm_x, y: yMin}, {x: tm_x, y: lnKaTm}], borderColor: '#c0392b', borderWidth: 2.5, borderDash: [2, 4], pointRadius: 0, showLine: true, order: -2},
+      ]},
+      options:scatterOpts('1000/T (K⁻¹)', 'ln(Kₐ)', {
+        plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}},
+        scales:{
+          x:{title:{display:true,text:'1000/T (K⁻¹)',font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
+          y:{title:{display:true,text:'ln(Kₐ)',font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}, min:yMin, max:yMax},
+        },
+      })
+    });
+  }
+
+  // ── Derivative ────────────────────────────────────────────────────────
+  document.getElementById('derivTitle').textContent = 'dF/dT derivative · Tm estimate';
+  rebuildChart('chartDeriv', {
     type:'scatter', data:{datasets:[
-      {label:derivLabel, data:zip(r.T_raw,r.derivative), borderColor:'#c0392b', borderWidth:1.5, pointRadius:0, showLine:true, tension:.3},
+      {label:'dF/dT', data:zip(r.T_used, fit?.derivative||[]), borderColor:'#c0392b', borderWidth:3, pointRadius:0, showLine:true, tension:.3},
     ]},
-    options:scatterOpts('Temperature (°C)', derivLabel)
+    options:scatterOpts('Temperature (°C)', 'dF/dT')
   });
 
-  //if (fit?.success) {
-  //  document.getElementById('fitResults').classList.remove('hidden');
-  //  document.getElementById('resultsGrid').innerHTML = [
-  //    card('T<sub>m</sub>',              fit.Tm.toFixed(2),           '± '+fit.Tm_err.toFixed(2),        '°C'),
-  //    card('ΔH°',                        (fit.dH/1000).toFixed(1),    '± '+(fit.dH_err/1000).toFixed(1), 'kJ/mol'),
-  //    card('ΔS°',                        (fit.dS/4.184).toFixed(1),   '',                                'cal/(mol·K)'),
-  //    card('ΔG°<sub>25</sub>',           (fit.dG_25/1000).toFixed(2), '',                                'kJ/mol'),
-  //    card('RMSE',                       fit.rmse.toExponential(2),   '',                                ''),
-  //    card('T<sub>m</sub> (derivative)', r.derivative.Tm_deriv.toFixed(2),'',                            '°C'),
-  //  ].join('');
-  //}
+  // ── Result cards ──────────────────────────────────────────────────────
+  let html = '';
+  // van't Hoff results — shown even if curve fit failed
+  if (vh?.success) {
+    html += card("Tₘ (van't Hoff)", vh.T_m_vH.toFixed(2), null, '°C');
+    html += card('ΔH° (vH)', vh.dH.toFixed(2), null, 'kcal/mol');
+    html += card('ΔS° (vH)', (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
+    html += card('ΔG°₃₇ (vH)', vh.dG.toFixed(2), null, 'kcal/mol');
+  }
+  if (fit?.success) {
+    html += card('Tₘ (fit)', fit.T_m_fit.toFixed(2), null, '°C');
+    html += card('ΔH° (fit)', fit.dH.toFixed(2), null, 'kcal/mol');
+    html += card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
+    html += card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), null, 'kcal/mol');
+  } else if (fit?.error) {
+    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error}</div>`;
+  }
+  if (r.TmRaw != null) html += card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C');
+  document.getElementById('resultsGrid').innerHTML = html;
+  document.getElementById('fitResults').classList.toggle('hidden', !html);
+
+  accumulateColumnResult(r);
 }
+
+const multiPalette = ['#56B4E9','#E69F00','#009E73','#CC79A7','#0072B2','#D55E00','#F0E442','#999999'];
+
+function renderMultiResults(r) {
+  const meltSets = [];
+  r.columns.forEach((c, i) => {
+    const color = multiPalette[i % multiPalette.length];
+    meltSets.push({
+      label: c.name,
+      data: zip(r.T_all, c.signal_all),
+      borderColor: color,
+      borderWidth: 3,
+      pointRadius: 0, showLine: true, tension: 0,
+    });
+    const [m1,b1] = c.base_b_f, [m2,b2] = c.base_ub_f;
+    const n = r.T_used.length, q = Math.floor(n / 4);
+    const blOpts = {borderWidth:1.5, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    meltSets.push(
+      {label:`${c.name} folded bl.`, data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:color, ...blOpts},
+      {label:`${c.name} unfolded bl.`, data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:color, ...blOpts},
+    );
+    if (Array.isArray(c.fit) && c.fit.length) {
+      meltSets.push({
+        label: `${c.name} fit`,
+        data: r.T_used.map((t, j) => ({x: t, y: c.fit[j]})),
+        borderColor: color,
+        borderWidth: 2.5,
+        borderDash: [2, 2],
+        pointRadius: 0, showLine: true, spanGaps: true, tension: 0, order: -1,
+      });
+    }
+  });
+  meltRange.low  = r.T_used[0];
+  meltRange.high = r.T_used[r.T_used.length - 1];
+  rebuildChart('chartMelt', {
+    type: 'scatter', data: {datasets: meltSets},
+    options: scatterOpts('Temperature (°C)', 'Fluorescence',
+      {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
+    ),
+    plugins: [analysisRangePlugin()],
+  });
+
+  if (charts.chartAlpha) { charts.chartAlpha.destroy(); delete charts.chartAlpha; }
+  if (charts.chartDeriv) { charts.chartDeriv.destroy(); delete charts.chartDeriv; }
+
+  const fmt = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
+  let html = '';
+  html += card('ΔH° (multi fit)', fmt(r.dH), null, 'kcal/mol');
+  html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), null, 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), null, 'kcal/mol');
+  html += card('n columns', r.columns.length, null, '');
+  document.getElementById('resultsGrid').innerHTML = html;
+  document.getElementById('fitResults').classList.toggle('hidden', !html);
+
+  r.columns.forEach(c => {
+    colResults[c.name] = {
+      TmRaw: null,
+      vh:    null,
+      fit:   {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
+    };
+  });
+  renderColResults();
+}
+
+function accumulateColumnResult(r) {
+  const col = r.name || document.getElementById('colSelect').value;
+  if (!col) return;
+  colResults[col] = {
+    TmRaw:  r.TmRaw,
+    vh:     r.vantHoff?.success ? r.vantHoff    : null,
+    fit:    r.fit_result?.success ? r.fit_result : null,
+  };
+  renderColResults();
+}
+
+function renderColResults() {
+  const cols = Object.keys(colResults);
+  const sec  = document.getElementById('colResultsSection');
+  if (!cols.length) { sec.classList.add('hidden'); return; }
+  sec.classList.remove('hidden');
+  const fmt = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
+  document.getElementById('colResultsBody').innerHTML = cols.map(c => {
+    const e = colResults[c];
+    return `<tr>
+      <td>${c}</td>
+      <td>${fmt(e.TmRaw)}</td>
+      <td>${fmt(e.vh?.T_m_vH)}</td>
+      <td>${fmt(e.vh?.dH)}</td>
+      <td>${e.vh ? fmt(e.vh.dS * 1000, 1) : '—'}</td>
+      <td>${fmt(e.vh?.dG)}</td>
+      <td>${fmt(e.fit?.T_m_fit)}</td>
+      <td>${fmt(e.fit?.dH)}</td>
+      <td>${e.fit ? fmt(e.fit.dS * 1000, 1) : '—'}</td>
+      <td>${fmt(e.fit?.dG)}</td>
+      <td><button onclick="removeColResult('${c.replace(/'/g, "\\'")}')" class="text-muted hover:text-red-500 font-mono text-xs px-1">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+window.removeColResult = function(col) {
+  delete colResults[col];
+  renderColResults();
+};
 
 function card(label,value,err,unit){
   return `<div class="bg-surface rounded-xl border border-border shadow-sm p-4">
@@ -569,25 +831,29 @@ window.removeVhoff=function(i){
 
 // ── Download ──────────────────────────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click',()=>{
-  if (!lastResult?.fit?.success) return;
-  const f=lastResult.fit;
-  let csv='Parameter,Value,Error,Unit\n';
-  csv+=`Tm,${f.Tm.toFixed(4)},${f.Tm_err.toFixed(4)},°C\n`;
-  csv+=`dH,${(f.dH/1000).toFixed(3)},${(f.dH_err/1000).toFixed(3)},kJ/mol\n`;
-  csv+=`dS,${(f.dS/4.184).toFixed(3)},,cal/(mol·K)\n`;
-  csv+=`dG_25,${(f.dG_25/1000).toFixed(4)},,kJ/mol\n`;
-  csv+=`RMSE,${f.rmse.toExponential(4)},,\n\nT_raw,S_raw,S_fit,lower_bl,upper_bl,alpha_obs\n`;
-  for (let i=0;i<lastResult.T_raw.length;i++) {
-    const T=lastResult.T_raw[i];
-    csv+=`${T},${lastResult.S_raw[i]},${interp(T,f.T_curve,f.S_curve)},${f.lower_bl[i]??''},${f.upper_bl[i]??''},${f.alpha_obs[i]??''}\n`;
+  const cols = Object.keys(colResults);
+  if (!cols.length) return;
+  const headers = [
+    'column',
+    'Tm_raw_C',
+    'Tm_vH_C', 'dH_vH_kcal_mol', 'dS_vH_cal_molK', 'dG37_vH_kcal_mol',
+    'Tm_fit_C', 'dH_fit_kcal_mol', 'dS_fit_cal_molK', 'dG37_fit_kcal_mol',
+  ];
+  const cell = (v, scale=1) => (v == null || isNaN(v)) ? '' : (+v * scale).toString();
+  const lines = [headers.join(',')];
+  for (const c of cols) {
+    const e = colResults[c];
+    lines.push([
+      `"${c.replace(/"/g, '""')}"`,
+      cell(e.TmRaw),
+      cell(e.vh?.T_m_vH),  cell(e.vh?.dH),  cell(e.vh?.dS, 1000),  cell(e.vh?.dG),
+      cell(e.fit?.T_m_fit),cell(e.fit?.dH), cell(e.fit?.dS, 1000), cell(e.fit?.dG),
+    ].join(','));
   }
-  if (vhoffPoints.length){
-    csv+='\nCT_uM,Tm_C,inv_Tm,ln_CT\n';
-    vhoffPoints.forEach(p=>csv+=`${(p.CT*1e6).toFixed(4)},${p.Tm_C.toFixed(4)},${p.inv_Tm},${p.ln_CT}\n`);
-  }
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='rna_melt_results.csv'; a.click();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'text/csv'}));
+  a.download = 'rna_melt_results.csv';
+  a.click();
 });
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
@@ -598,11 +864,15 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
   document.getElementById('fileInput').value='';
   document.getElementById('runBtn').disabled=true;
   document.getElementById('autoBtn').disabled=true;
-  ['T_low','T_high','CT','saltConc'].forEach(id=>document.getElementById(id).value='');
+  ['T_low','T_high'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('CT').value='0.5';
+  document.getElementById('saltConc').value='150';
   document.getElementById('bl_lower_offset').value='10';
   document.getElementById('bl_upper_offset').value='10';
   //document.getElementById('fixBaselines').checked=false;
   document.getElementById('vhoffSection').classList.add('hidden');
+  for (const k of Object.keys(colResults)) delete colResults[k];
+  renderColResults();
   Object.values(charts).forEach(c=>c?.destroy());
   hideError(); hideRunning();
 });
@@ -610,24 +880,73 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function collectParams() {
   const g=id=>{ const v=document.getElementById(id).value; return v===''?null:parseFloat(v); };
+  const col = document.getElementById('colSelect').value || null;
+  const isMulti = col === '__multi__';
   const params={
     signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
     structure_type:  document.querySelector('input[name="structType"]:checked')?.value  || 'monomer',
-    column:          document.getElementById('colSelect').value || null,
-    //fix_baselines:   document.getElementById('fixBaselines').checked,
+    column:          col,
     bl_lower_offset: g('bl_lower_offset') ?? 10,
     bl_upper_offset: g('bl_upper_offset') ?? 10,
+    salt:            isMulti ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
+    oligo:           g('CT') ?? 0.5,
   };
+  if (isMulti) {
+    const oligoMulti = {};
+    document.querySelectorAll('.multi-ct').forEach(el => {
+      const v = parseFloat(el.value);
+      oligoMulti[el.dataset.col] = isNaN(v) ? 0.5 : v;
+    });
+    params.oligo_multi = oligoMulti;
+  }
   if (g('T_low')    !== null) params.T_low   = g('T_low');
   if (g('T_high')   !== null) params.T_high  = g('T_high');
-  if (g('saltConc') !== null) params.salt_mM = g('saltConc');
-  if (g('CT') !== null) params.CT = g('CT');
-  // const ct=g('CT');
-  // if (ct!==null && ct>0) params.CT=ct*1e-6;
   return params;
 }
 
 function setIfEmpty(id,v){ const el=document.getElementById(id); if(!el.value) el.value=v; }
+
+function initTRangeSlider(tMin, tMax){
+  const wrap = document.getElementById('tRangeSlider');
+  const lo   = document.getElementById('trMin');
+  const hi   = document.getElementById('trMax');
+  const fill = document.getElementById('trFill');
+  const tLowIn  = document.getElementById('T_low');
+  const tHighIn = document.getElementById('T_high');
+  wrap.style.display = '';
+  for (const el of [lo, hi]) { el.min = tMin; el.max = tMax; el.step = 0.5; }
+  lo.value = parseFloat(tLowIn.value)  || tMin;
+  hi.value = parseFloat(tHighIn.value) || tMax;
+  const updateFill = () => {
+    const span = tMax - tMin || 1;
+    fill.style.left  = ((+lo.value - tMin) / span * 100) + '%';
+    fill.style.right = ((tMax - +hi.value) / span * 100) + '%';
+  };
+  const sync = (src) => {
+    if (+lo.value > +hi.value - 0.5) {
+      if (src === 'lo') lo.value = +hi.value - 0.5;
+      else              hi.value = +lo.value + 0.5;
+    }
+    tLowIn.value  = (+lo.value).toFixed(1);
+    tHighIn.value = (+hi.value).toFixed(1);
+    updateFill();
+    meltRange.low  = +lo.value;
+    meltRange.high = +hi.value;
+    if (charts.chartMelt) charts.chartMelt.update('none');
+  };
+  lo.addEventListener('input', () => sync('lo'));
+  hi.addEventListener('input', () => sync('hi'));
+  lo.addEventListener('change', () => { if (dfLoaded) runAnalysis(); });
+  hi.addEventListener('change', () => { if (dfLoaded) runAnalysis(); });
+  const fromNum = () => {
+    lo.value = parseFloat(tLowIn.value)  || tMin;
+    hi.value = parseFloat(tHighIn.value) || tMax;
+    updateFill();
+  };
+  tLowIn.addEventListener('change', fromNum);
+  tHighIn.addEventListener('change', fromNum);
+  updateFill();
+}
 
 function rebuildChart(id,config){
   if(charts[id]) charts[id].destroy();
@@ -647,6 +966,32 @@ function scatterOpts(xLabel,yLabel,extra={}){
 }
 
 function zip(xs,ys){ return xs.map((x,i)=>({x,y:ys[i]})); }
+
+const meltRange = {low: null, high: null};
+
+function analysisRangePlugin(){
+  return {
+    id: 'analysisRange',
+    beforeDatasetsDraw(chart){
+      if (meltRange.low == null || meltRange.high == null) return;
+      const {ctx, chartArea:{top,bottom,left,right}, scales:{x}} = chart;
+      const xLow  = Math.max(left,  Math.min(right, x.getPixelForValue(meltRange.low)));
+      const xHigh = Math.max(left,  Math.min(right, x.getPixelForValue(meltRange.high)));
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.06)';
+      if (xLow  > left)  ctx.fillRect(left, top, xLow - left, bottom - top);
+      if (xHigh < right) ctx.fillRect(xHigh, top, right - xHigh, bottom - top);
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(xLow,  top); ctx.lineTo(xLow,  bottom);
+      ctx.moveTo(xHigh, top); ctx.lineTo(xHigh, bottom);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+}
 
 function interp(x,xs,ys){
   let best=0,bd=Infinity;

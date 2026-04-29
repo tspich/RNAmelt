@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from . import functions, constants
+#from . import functions, constants
+import functions, constants
 
 palette = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#999999", "#CC79A7"]
 col_raw = palette[1]

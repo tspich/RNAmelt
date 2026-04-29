@@ -26,87 +26,15 @@ Adjustable parameters passed in via `params` dict
 """
 
 import numpy as np
-from scipy.optimize import curve_fit
-from scipy.signal import savgol_filter
-from analysis.utils import celsius_to_kelvin, R, safe_json
-from analysis.util import analyze
-
-
-# ─── Two-state model ──────────────────────────────────────────────────────────
-
-def fraction_unfolded(T_C, dH, Tm_C):
-    """
-    α(T) for a two-state intramolecular transition.
-    T_C  : temperature in °C
-    dH   : enthalpy in J/mol  (positive for unfolding)
-    Tm_C : melting temperature in °C
-    """
-    T  = celsius_to_kelvin(T_C)
-    Tm = celsius_to_kelvin(Tm_C)
-    K  = np.exp((dH / R) * (1.0 / Tm - 1.0 / T))
-    return K / (1.0 + K)
-
-
-def two_state_signal(T_C, dH, Tm_C, mL, bL, mU, bU):
-    """Full two-state model: sloped lower + upper baselines."""
-    alpha = fraction_unfolded(T_C, dH, Tm_C)
-    lower = mL * T_C + bL
-    upper = mU * T_C + bU
-    return lower * (1 - alpha) + upper * alpha
-
-
-def two_state_signal_fixed_baselines(T_C, dH, Tm_C, mL, bL, mU, bU):
-    """Same model but called with externally fixed mL, bL, mU, bU."""
-    return two_state_signal(T_C, dH, Tm_C, mL, bL, mU, bU)
-
-
-# ─── Derivative (for Tm estimation) ──────────────────────────────────────────
-
-def numerical_derivative(T, signal):
-    """Smoothed first derivative; peak position ≈ Tm."""
-    if len(T) < 7:
-        return T, np.gradient(signal, T)
-    smoothed = savgol_filter(signal, window_length=min(11, len(signal) // 2 * 2 - 1), polyorder=3)
-    deriv    = np.gradient(smoothed, T)
-    return T, deriv
-
-
-# ─── Auto-baseline estimation ─────────────────────────────────────────────────
-
-def estimate_baselines(T, signal, T_low, T_high):
-    """
-    Fit linear baselines to the pre- and post-transition regions.
-    Returns (mL, bL, mU, bU) as initial guesses.
-    """
-    pre  = (T < T_low)
-    post = (T > T_high)
-
-    def fit_line(mask):
-        if mask.sum() < 2:
-            return 0.0, float(signal[mask].mean()) if mask.sum() else float(signal.mean())
-        p = np.polyfit(T[mask], signal[mask], 1)
-        return float(p[0]), float(p[1])
-
-    mL, bL = fit_line(pre)
-    mU, bU = fit_line(post)
-    return mL, bL, mU, bU
-
-
-# ─── Baseline-corrected fraction unfolded ────────────────────────────────────
-
-def correct_baselines(T, signal, mL, bL, mU, bU):
-    lower = mL * T + bL
-    upper = mU * T + bU
-    denom = upper - lower
-    # avoid division by near-zero
-    with np.errstate(invalid="ignore", divide="ignore"):
-        alpha = np.where(np.abs(denom) > 1e-12, (signal - lower) / denom, np.nan)
-    return alpha
-
+#from scipy.optimize import curve_fit
+#from scipy.signal import savgol_filter
+from analysis.utils import safe_json
+#from analysis.util import analyze
+from analysis import methods, functions
 
 # ─── Main entry point ────────────────────────────────────────────────────────
 
-def run(df, params: dict) -> dict:
+def run(df, params: dict):# -> dict:
     """
     params keys (all optional — sensible defaults applied):
         T_low         (float, °C)   lower boundary of transition window
@@ -126,199 +54,243 @@ def run(df, params: dict) -> dict:
         return {"name": "Melting Analysis", "error": "No signal columns found."}
 
     col = params.get("column", sig_cols[0])
-    if col not in df.columns:
-        col = sig_cols[0]
+    if col in ('multi', '__multi__'):
+        return _run_multi(df, params, T_all, sig_cols)
+    else:
+        if col not in df.columns:
+            col = sig_cols[0]
 
-    signal_all = df[col].values.astype(float)
+        signal_all = df[col].values.astype(float)
 
-    # Remove NaNs
-    valid = ~np.isnan(signal_all)
-    T_all      = T_all[valid]
-    signal_all = signal_all[valid]
+        # Remove NaNs
+        valid = ~np.isnan(signal_all)
+        T_all      = T_all[valid]
+        signal_all = signal_all[valid]
 
-    if len(T_all) < 10:
-        return {"name": "Melting Analysis", "error": "Not enough data points."}
+        if len(T_all) < 10:
+            return {"name": "Melting Analysis", "error": "Not enough data points."}
+
+        T_min, T_max = float(T_all.min()), float(T_all.max())
+
+        #print(params)
+
+        T_low  = float(params.get("T_low",  T_min))
+        T_high = float(params.get("T_high", T_max))
+
+        pos_start = np.where(T_all == T_low)[0][0]
+        pos_end   = np.where(T_all == T_high)[0][0]+1
+
+        salt_concentration = float(params.get("salt", 150))
+        oligo_concentration = float(params.get("oligo", 0.5))
+
+        TT = T_all[pos_start:pos_end]
+        used_data = signal_all[pos_start:pos_end]
+
+        c0 = 1e-6 * oligo_concentration*2
+
+        #signal_type = params.get("signal_type", "absorbance")
+        struct_type = params.get("struct_type", "heterodimer")
+        base_b_offset = params.get("bl_lower_offset")
+        base_ub_offset = params.get("bl_upper_offset")
+
+
+        #if signal_type == "absorbance":
+            # May implement automatic calculation of the oligo conc.
+            # through the extinction coefficient at some point.
+
+        # if signal_type == "fluorescence":
+        r_base_b_maxT=T_low+base_b_offset
+        r_base_ub_minT=T_high-base_ub_offset
+
+        T_m_raw, y_r, base_b_r, base_ub_r, base_med_r = methods.T_m_ds_raw(
+            TT,
+            used_data,
+            baseline_bound_maxT=r_base_b_maxT,
+            baseline_unbound_minT=r_base_ub_minT,
+            #debug=True
+        )
+        print(T_m_raw, base_b_r, base_ub_r, base_med_r)
+
+        #try:
+        print(len(TT), len(used_data), len(T_all), len(signal_all))
+        print('c0', c0)
+        print('struct_type', struct_type)
+
+        T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
+            TT,
+            used_data,
+            *base_b_r,
+            *base_ub_r,
+            c0,
+            border = 0.15,
+            #t1_min = t1_min,
+            #t1_max = t1_max
+            structType = struct_type,
+        )
+
+        print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
+
+        vantHoff = {
+            "success": True,
+            "dG":      dG_37_vH,
+            "dH":      dH_vH,
+            "dS":      dS_vH,
+            "T_m_vH":  T_m_vH,
+            "t1":      t1,
+            "K":       K,
+            "xdata":   xdata,
+            "ydata":   ydata,
+            "fit_vh":  fit_vh,
+        }
+
+        #except Exception as e:
+        #    vantHoff = {
+        #        "success": False,
+        #        "error":   str(e),
+        #    }
+        #    print('vantHoff', vantHoff)
+
+
+        if vantHoff['success']:
+            print(vantHoff["dH"])
+            if -150 < vantHoff["dH"] < 0:
+                dH_init = vantHoff["dH"]
+            else:
+                dH_init = -80
+            if -5 < vantHoff["dS"] < 0:
+                dS_init = vantHoff["dS"]
+            else:
+                dS_init = -0.2
+        else:
+            dH_init = -80
+            dS_init = -0.2
+
+        #try:
+        #print(len(TT), TT[0], TT[-1])
+        #print(len(used_data), min(used_data), max(used_data))
+        #print('c0', c0)
+        #print('dH_init', dH_init)
+        #print('dS_init', dS_init)
+
+        dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
+            TT,
+            used_data,
+            c0=c0,
+            dH_init = dH_init,
+            dS_init = dS_init,
+        )
+
+        #print(dG_37_f, dH_f, dS_f, T_m_f)
+
+        fit = np.array([ functions.full_function(
+            tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
+        ) for tt in TT ])
+
+        # NOTE: May need to check that, not general enough?
+        derivative = np.gradient(used_data, 0.5)/-1.
+
+        fit_result = {
+            "success":    True,
+            "dG":         dG_37_f,
+            "dH":         dH_f,
+            "dS":         dS_f,
+            "T_m_fit":    T_m_f,
+            "base_b_f":   base_b_f,
+            "base_ub_f":  base_ub_f,
+            "base_med_f": base_med_f,
+            "fit":        fit,
+            "derivative": derivative,
+        }
+
+        #except Exception as e:
+        #    fit_result = {
+        #        "success":    False,
+        #        "error":      str(e),
+        #    }
+
+
+        thermo_properties = {
+            "name":             col,
+            'oligoC':           oligo_concentration,
+            'c0':               c0,
+            'saltC':            salt_concentration,
+            'TmRaw':            T_m_raw,
+            'T_used':           TT,
+            'T_all':            T_all,
+            'signal':           used_data,
+            'signal_all':       signal_all,
+            'base_b_r':         base_b_r,
+            'base_ub_r':        base_ub_r,
+            'vantHoff':         vantHoff,
+            'fit_result':       fit_result,
+        }
+
+
+        return safe_json(thermo_properties)
+
+
+def _run_multi(df, params: dict, T_all, sig_cols):
+    """Simultaneous fit across all signal columns sharing dH, dS; independent baselines."""
+    oligo_multi = params.get("oligo_multi") or {}
+    salt_c      = float(params.get("salt", 150))
 
     T_min, T_max = float(T_all.min()), float(T_all.max())
-
     T_low  = float(params.get("T_low",  T_min))
     T_high = float(params.get("T_high", T_max))
-    salt_concentration = float(params.get("salt", 150))
-    oligo_concentration = float(params.get("oligo", 0.5))
 
-    signal_type = params.get("signal_type", "absorbance")
-    struct_type = params.get("struct_type", "heterodimer")
-    
-    print(T_min, T_max)
-    print(T_low, T_high)
-    print(salt_concentration)
-    print(oligo_concentration)
-    print(signal_type)
-    print(struct_type)
+    pos_start = int(np.where(T_all == T_low)[0][0])
+    pos_end   = int(np.where(T_all == T_high)[0][0]) + 1
+    TT        = T_all[pos_start:pos_end]
 
-    if signal_type == "fluorescence":
-        if struct_type == "heterodimer":
-            thermo_properties = []
+    ds, cs, oligos, col_names, signals_all = [], [], [], [], []
+    for c in sig_cols:
+        sig = df[c].values.astype(float)
+        if np.isnan(sig).any():
+            continue
+        oligo = float(oligo_multi.get(c, 0.5))
+        ds.append(sig[pos_start:pos_end])
+        cs.append(1e-6 * oligo * 2)
+        oligos.append(oligo)
+        col_names.append(c)
+        signals_all.append(sig)
 
-            analyze(
-                col,
-                salt_concentration,
-                oligo_concentration,
-                T_low,
-                T_high,
-                signal_all,
-                store_data=thermo_properties,
-                T=T_all,
-            )
+    if len(ds) < 2:
+        return {"name": "Melting Analysis", "error": "multi fit needs at least 2 valid columns"}
 
-            print(type(thermo_properties))
-            for t in thermo_properties[0]:
-                print(t,type(thermo_properties[0][t]))
+    try:
+        dG_37, dH, dS, T_ms, y_dats, bl_lo, bl_hi, bl_me = methods.fit_full_function_multi(
+            TT, ds, cs=cs, dH_init=-80, dS_init=-0.2,
+        )
+    except Exception as e:
+        return {"name": "Melting Analysis", "error": f"multi fit failed: {e}"}
 
-            return safe_json(thermo_properties[0])
+    columns = []
+    for i, name in enumerate(col_names):
+        fit = np.array([
+            functions.full_function(tt, dH, dS, *bl_lo[i], *bl_hi[i], c0=cs[i])
+            for tt in TT
+        ])
+        columns.append({
+            "name":       name,
+            "oligoC":     oligos[i],
+            "c0":         cs[i],
+            "T_m_fit":    T_ms[i],
+            "base_b_f":   bl_lo[i],
+            "base_ub_f":  bl_hi[i],
+            "base_med_f": bl_me[i],
+            "fit":        fit,
+            "signal":     ds[i],
+            "signal_all": signals_all[i],
+        })
 
-        elif struct_type == "monomer":
-            return {"name": "Melting Analysis", "error": "Not implemented yet."}
-        elif struct_type == "homodimer":
-            return {"name": "Melting Analysis", "error": "Not implemented yet."}
-
-    elif signal_type == "absorbance":
-        return {"name": "Melting Analysis", "error": "Not implemented yet."}
-
-    else:
-        return {"name": "Melting Analysis", "error": "Signal type is missing"}
-
-
-    ## Auto-estimate baselines if not supplied
-    #mL_est, bL_est, mU_est, bU_est = estimate_baselines(T_all, signal_all, T_low, T_high)
-    #mL = float(params.get("mL", mL_est))
-    #bL = float(params.get("bL", bL_est))
-    #mU = float(params.get("mU", mU_est))
-    #bU = float(params.get("bU", bU_est))
-
-    #fix_baselines = bool(params.get("fix_baselines", False))
-
-    ## Transition window mask for fitting
-    #mask = (T_all >= T_low) & (T_all <= T_high)
-    #T_fit  = T_all[mask]
-    #S_fit  = signal_all[mask]
-
-    #if len(T_fit) < 5:
-    #    return {"name": "Melting Analysis", "error": "Transition window too narrow — too few points for fitting."}
-
-    ## ── Fit ──────────────────────────────────────────────────────────────────
-    ## Initial guess: Tm from derivative peak, ΔH ~200 kJ/mol
-    #_, deriv_all = numerical_derivative(T_all, signal_all)
-    #Tm_guess = float(T_all[np.argmax(deriv_all)])
-    #dH_guess = 200_000.0   # J/mol
-
-    #fit_result = {}
-    #try:
-    #    if fix_baselines:
-    #        def model(T_C, dH, Tm_C):
-    #            return two_state_signal(T_C, dH, Tm_C, mL, bL, mU, bU)
-    #        p0     = [dH_guess, Tm_guess]
-    #        bounds = ([0, T_min], [2_000_000, T_max])
-    #        popt, pcov = curve_fit(model, T_fit, S_fit, p0=p0, bounds=bounds, maxfev=20000)
-    #        dH_fit, Tm_fit = popt
-    #        mL_fit, bL_fit, mU_fit, bU_fit = mL, bL, mU, bU
-    #        perr = np.sqrt(np.diag(pcov))
-    #        dH_err, Tm_err = perr[0], perr[1]
-    #    else:
-    #        def model(T_C, dH, Tm_C, mL_, bL_, mU_, bU_):
-    #            return two_state_signal(T_C, dH, Tm_C, mL_, bL_, mU_, bU_)
-    #        p0     = [dH_guess, Tm_guess, mL, bL, mU, bU]
-    #        bounds = ([0,       T_min,   -np.inf, -np.inf, -np.inf, -np.inf],
-    #                  [2e6,     T_max,    np.inf,  np.inf,  np.inf,  np.inf])
-    #        popt, pcov = curve_fit(model, T_fit, S_fit, p0=p0, bounds=bounds, maxfev=20000)
-    #        dH_fit, Tm_fit, mL_fit, bL_fit, mU_fit, bU_fit = popt
-    #        perr = np.sqrt(np.diag(pcov))
-    #        dH_err, Tm_err = perr[0], perr[1]
-
-    #    dS_fit = dH_fit / celsius_to_kelvin(Tm_fit)          # J/(mol·K)
-    #    dG_fit = dH_fit - 298.15 * dS_fit                    # J/mol at 25°C
-
-    #    # Fitted curve over full T range
-    #    T_curve  = np.linspace(T_min, T_max, 300)
-    #    S_curve  = two_state_signal(T_curve, dH_fit, Tm_fit, mL_fit, bL_fit, mU_fit, bU_fit)
-
-    #    # Baseline lines
-    #    lower_bl = mL_fit * T_all + bL_fit
-    #    upper_bl = mU_fit * T_all + bU_fit
-
-    #    # Baseline-corrected fraction unfolded
-    #    alpha_obs = correct_baselines(T_all, signal_all, mL_fit, bL_fit, mU_fit, bU_fit)
-    #    alpha_fit = fraction_unfolded(T_curve, dH_fit, Tm_fit)
-
-    #    # Residuals
-    #    S_fit_vals = two_state_signal(T_fit, dH_fit, Tm_fit, mL_fit, bL_fit, mU_fit, bU_fit)
-    #    residuals  = (S_fit - S_fit_vals).tolist()
-    #    rmse       = float(np.sqrt(np.mean(np.array(residuals)**2)))
-
-    #    fit_result = safe_json({
-    #        "success":   True,
-    #        "dH":        dH_fit,           # J/mol
-    #        "dH_err":    dH_err,
-    #        "Tm":        Tm_fit,           # °C
-    #        "Tm_err":    Tm_err,
-    #        "dS":        dS_fit,           # J/(mol·K)
-    #        "dG_25":     dG_fit,           # J/mol
-    #        "mL":        mL_fit,
-    #        "bL":        bL_fit,
-    #        "mU":        mU_fit,
-    #        "bU":        bU_fit,
-    #        "rmse":      rmse,
-    #        "T_curve":   T_curve.tolist(),
-    #        "S_curve":   S_curve.tolist(),
-    #        "lower_bl":  lower_bl.tolist(),
-    #        "upper_bl":  upper_bl.tolist(),
-    #        "alpha_obs_T": T_all.tolist(),
-    #        "alpha_obs":   alpha_obs.tolist(),
-    #        "alpha_fit_T": T_curve.tolist(),
-    #        "alpha_fit":   alpha_fit.tolist(),
-    #        "residual_T":  T_fit.tolist(),
-    #        "residuals":   residuals,
-    #    })
-
-    #except Exception as e:
-    #    fit_result = {"success": False, "error": str(e)}
-
-    ## ── Derivative ───────────────────────────────────────────────────────────
-    #_, deriv = numerical_derivative(T_all, signal_all)
-    #deriv_result = safe_json({
-    #    "T":     T_all.tolist(),
-    #    "deriv": deriv.tolist(),
-    #    "Tm_deriv": float(T_all[np.argmax(deriv)]),
-    #})
-
-    ## ── Van't Hoff: 1/Tm vs ln[CT] ──────────────────────────────────────────
-    ## Stored for multi-concentration assembly in the browser;
-    ## a single run just contributes one point.
-    #CT = params.get("CT", None)
-    #vantHoff_point = None
-    #if CT and float(CT) > 0 and fit_result.get("success"):
-    #    Tm_K = celsius_to_kelvin(fit_result["Tm"])
-    #    vantHoff_point = safe_json({
-    #        "CT":     float(CT),
-    #        "inv_Tm": float(1.0 / Tm_K),
-    #        "ln_CT":  float(np.log(float(CT))),
-    #    })
-
-    #return safe_json({
-    #    "name":           "Melting Analysis",
-    #    "column":         col,
-    #    "signal_type":    signal_type,
-    #    "T_raw":          T_all.tolist(),
-    #    "S_raw":          signal_all.tolist(),
-    #    "T_low":          T_low,
-    #    "T_high":         T_high,
-    #    "fit":            fit_result,
-    #    "derivative":     deriv_result,
-    #    "vantHoff_point": vantHoff_point,
-    #    "sig_cols":       sig_cols,
-    #    "params_used": safe_json({
-    #        "mL": mL, "bL": bL, "mU": mU, "bU": bU,
-    #        "T_low": T_low, "T_high": T_high,
-    #        "fix_baselines": fix_baselines,
-    #    }),
-    #})
+    return safe_json({
+        "name":       "multi",
+        "is_multi":   True,
+        "saltC":      salt_c,
+        "T_used":     TT,
+        "T_all":      T_all,
+        "dG":         dG_37,
+        "dH":         dH,
+        "dS":         dS,
+        "columns":    columns,
+    })
