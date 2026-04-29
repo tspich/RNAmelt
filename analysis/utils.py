@@ -3,8 +3,6 @@ utils.py — shared helpers for RNA melting analysis.
 """
 
 import numpy as np
-import pandas as pd
-
 
 R = 8.314  # J/(mol·K)
 
@@ -29,4 +27,6 @@ def safe_json(obj):
         return None if np.isnan(obj) else float(obj)
     if isinstance(obj, np.ndarray):
         return [safe_json(x) for x in obj.tolist()]
+    if isinstance(obj, Exception):
+        return str(obj)
     return obj
