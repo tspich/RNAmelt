@@ -361,6 +361,10 @@ tailwind.config = {
             <th>ΔH fit (kcal/mol)</th>
             <th>ΔS fit (cal/mol·K)</th>
             <th>ΔG₃₇ fit (kcal/mol)</th>
+            <th>Tₘ multi (°C)</th>
+            <th>ΔH multi (kcal/mol)</th>
+            <th>ΔS multi (cal/mol·K)</th>
+            <th>ΔG₃₇ multi (kcal/mol)</th>
             <th></th>
           </tr></thead>
           <tbody id="colResultsBody"></tbody>
@@ -370,16 +374,40 @@ tailwind.config = {
 
     <!-- Van't Hoff multi-conc -->
     <div id="vhoffSection" class="hidden mb-5">
-      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Van't Hoff — accumulated concentrations</div>
-      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-3">
+      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Van't Hoff — concentration series</div>
+      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-x-auto mb-3">
         <table class="w-full vhoff-table">
-          <thead><tr><th>CT (µM)</th><th>Tm (°C)</th><th>1/Tm (K⁻¹)</th><th>ln[CT]</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Column</th>
+            <th>CT (µM)</th>
+            <th>ln(C<sub>T</sub>/f)</th>
+            <th>Tₘ raw (°C)</th>
+            <th>1/Tₘ raw (K⁻¹)</th>
+            <th>Tₘ vH (°C)</th>
+            <th>1/Tₘ vH (K⁻¹)</th>
+            <th>Tₘ fit (°C)</th>
+            <th>1/Tₘ fit (K⁻¹)</th>
+          </tr></thead>
           <tbody id="vhoffTableBody"></tbody>
         </table>
       </div>
       <div id="vhoffReg" class="hidden bg-surface rounded-xl border border-border shadow-sm p-4">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Linear regression: 1/Tm = (R/ΔH)·ln[CT] + ΔS/ΔH</div>
-        <div id="vhoffRegValues" class="flex gap-6 flex-wrap font-mono text-sm"></div>
+        <div id="vhoffRegHeader" class="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Linear regression: 1/T<sub>m</sub> = (R/ΔH)·ln(C<sub>T</sub>/f) + ΔS/ΔH</div>
+        <div class="overflow-x-auto">
+          <table class="w-full vhoff-table">
+            <thead><tr>
+              <th>Method</th>
+              <th>n</th>
+              <th>slope (K⁻¹)</th>
+              <th>intercept (K⁻¹)</th>
+              <th>ΔH° (kcal/mol)</th>
+              <th>ΔS° (cal/mol·K)</th>
+              <th>ΔG°₃₇ (kcal/mol)</th>
+              <th>R²</th>
+            </tr></thead>
+            <tbody id="vhoffRegValues"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -405,7 +433,7 @@ const PYTHON_MODULES = [
   { path: 'analysis/analysis_melting.py' },
 ];
 
-let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[];
+let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
 const colResults={};
 const charts={};
 
@@ -559,7 +587,6 @@ document.getElementById('autoBtn').addEventListener('click', () => {
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderResults(r) {
   if (!r.is_concentration) {
-    document.getElementById('vhoffSection').classList.add('hidden');
     hideInfo();
     document.getElementById('alphaTitle').innerHTML =
       `Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T`;
@@ -738,18 +765,27 @@ function renderMultiResults(r) {
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
   r.columns.forEach(c => {
+    const prev = colResults[c.name] || {};
     colResults[c.name] = {
-      TmRaw: null,
-      vh:    null,
-      fit:   {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
+      TmRaw: prev.TmRaw ?? null,
+      vh:    prev.vh    ?? null,
+      fit:   prev.fit   ?? null,
+      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
     };
   });
   renderColResults();
 }
 
 function renderConcentrationResults(r) {
-  const vh = r.vantHoff;
+  lastConcResult = r;
+  const series = r.series || {raw: r.vantHoff, vh: null, fit: null};
+  const vh = series.raw;
   const f  = r.self_complementary ? 1 : 4;
+  const methodMeta = {
+    raw: {label: 'Tₘ raw', color: '#1a6b4a'},
+    vh:  {label: 'Tₘ vH',  color: '#0072B2'},
+    fit: {label: 'Tₘ fit', color: '#D55E00'},
+  };
 
   // ── Melting curves per column (raw + Tm marker) ───────────────────────
   const meltSets = [];
@@ -790,23 +826,28 @@ function renderConcentrationResults(r) {
   const xLabel = `ln(C_T/${f})`;
   document.getElementById('alphaTitle').innerHTML =
     `Concentration series &middot; 1/T<sub>m</sub> vs ln(C<sub>T</sub>/${f})`;
+  const alphaSets = [];
+  ['raw', 'vh', 'fit'].forEach(key => {
+    const s = series[key];
+    if (!s) return;
+    const meta = methodMeta[key];
+    alphaSets.push({
+      label: `${meta.label} fit`,
+      data: s.ln_ct_line.map((x, i) => ({x, y: s.inv_tm_line[i]})),
+      borderColor: meta.color, borderWidth: 2.5, borderDash: [5, 3],
+      pointRadius: 0, showLine: true,
+    });
+    alphaSets.push({
+      label: `${meta.label} data`,
+      data: s.ln_ct.map((x, i) => ({x, y: s.inv_tm[i]})),
+      borderColor: meta.color,
+      backgroundColor: meta.color,
+      pointRadius: 5, showLine: false,
+    });
+  });
   rebuildChart('chartAlpha', {
     type: 'scatter',
-    data: {datasets: [
-      {
-        label: 'Linear fit',
-        data: vh.ln_ct_line.map((x, i) => ({x, y: vh.inv_tm_line[i]})),
-        borderColor: '#D55E00', borderWidth: 2.5, borderDash: [5, 3],
-        pointRadius: 0, showLine: true,
-      },
-      {
-        label: 'Data',
-        data: vh.ln_ct.map((x, i) => ({x, y: vh.inv_tm[i]})),
-        borderColor: '#1a6b4a',
-        backgroundColor: '#1a6b4a',
-        pointRadius: 5, showLine: false,
-      },
-    ]},
+    data: {datasets: alphaSets},
     options: scatterOpts(xLabel, '1/Tm (K⁻¹)', {
       plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}},
     }),
@@ -815,39 +856,60 @@ function renderConcentrationResults(r) {
   // Hide derivative chart — not meaningful for this view.
   if (charts.chartDeriv) { charts.chartDeriv.destroy(); delete charts.chartDeriv; }
 
-  // ── Result cards ──────────────────────────────────────────────────────
+  // ── Result cards (raw-Tm summary) ─────────────────────────────────────
+  const fmtCard = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
   let html = '';
-  html += card('ΔH° (conc. vH)',  vh.dH.toFixed(2), null, 'kcal/mol');
-  html += card('ΔS° (conc. vH)',  (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
-  html += card('ΔG°₃₇ (conc. vH)', vh.dG_37.toFixed(2), null, 'kcal/mol');
-  html += card('R²',  vh.r_squared.toFixed(4), null, '');
-  html += card('n points', r.per_curve.length, null, '');
+  html += card('ΔH° (raw Tₘ)',  fmtCard(vh.dH), null, 'kcal/mol');
+  html += card('ΔS° (raw Tₘ)',  fmtCard(vh.dS * 1000, 1), null, 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (raw Tₘ)', fmtCard(vh.dG_37), null, 'kcal/mol');
+  html += card('R² (raw Tₘ)',   fmtCard(vh.r_squared, 4), null, '');
+  html += card('n points',      r.per_curve.length, null, '');
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.remove('hidden');
 
-  // ── Per-curve table + regression panel via vhoffSection ───────────────
+  // ── Per-curve table + regression-comparison table via vhoffSection ────
   const sec = document.getElementById('vhoffSection');
   sec.classList.remove('hidden');
-  document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map((c, i) => {
-    const ln_ct = vh.ln_ct[i];
-    return `<tr>
+  const fmtT  = v => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(2);
+  const fmtIT = v => (v == null || !isFinite(v) || v <= 0) ? '—' : (1 / v).toExponential(5);
+  document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map(c => `
+    <tr>
+      <td>${c.name}</td>
       <td>${c.oligoC}</td>
-      <td>${c.TmRaw.toFixed(2)}</td>
-      <td>${(1 / c.TmKelvin).toExponential(5)}</td>
-      <td>${ln_ct.toFixed(4)}</td>
-      <td></td>
-    </tr>`;
-  }).join('');
+      <td>${(+c.lnCT).toFixed(4)}</td>
+      <td>${fmtT(c.TmRaw)}</td>
+      <td>${fmtIT(c.TmRaw_K ?? c.TmKelvin)}</td>
+      <td>${fmtT(c.TmvH)}</td>
+      <td>${fmtIT(c.TmvH_K)}</td>
+      <td>${fmtT(c.Tmfit)}</td>
+      <td>${fmtIT(c.Tmfit_K)}</td>
+    </tr>`).join('');
+
+  document.getElementById('vhoffRegHeader').innerHTML =
+    `Linear regression: 1/T<sub>m</sub> = (R/ΔH)·ln(C<sub>T</sub>/${f}) + ΔS/ΔH ` +
+    `<span class="text-muted normal-case">· f = ${f} (${r.self_complementary ? 'self-complementary' : 'non-self-complementary'})</span>`;
   const reg = document.getElementById('vhoffReg');
   reg.classList.remove('hidden');
-  document.getElementById('vhoffRegValues').innerHTML = `
-    <div><div class="text-xs text-muted">slope</div><div class="font-medium">${vh.slope.toExponential(3)} K⁻¹</div></div>
-    <div><div class="text-xs text-muted">intercept</div><div class="font-medium">${vh.intercept.toExponential(3)} K⁻¹</div></div>
-    <div><div class="text-xs text-muted">ΔH°</div><div class="font-medium">${vh.dH.toFixed(2)} kcal/mol</div></div>
-    <div><div class="text-xs text-muted">ΔS°</div><div class="font-medium">${(vh.dS * 1000).toFixed(1)} cal/(mol·K)</div></div>
-    <div><div class="text-xs text-muted">ΔG°₃₇</div><div class="font-medium">${vh.dG_37.toFixed(2)} kcal/mol</div></div>
-    <div><div class="text-xs text-muted">R²</div><div class="font-medium">${vh.r_squared.toFixed(4)}</div></div>
-    <div><div class="text-xs text-muted">f factor</div><div class="font-medium">${f} <span class="text-muted text-xs">(${r.self_complementary ? 'self-complementary' : 'non-self-complementary'})</span></div></div>`;
+  document.getElementById('vhoffRegValues').innerHTML = ['raw', 'vh', 'fit'].map(key => {
+    const s = series[key];
+    const meta = methodMeta[key];
+    if (!s) {
+      return `<tr>
+        <td><span style="color:${meta.color}">●</span> ${meta.label}</td>
+        <td colspan="7" class="text-muted">— too few valid points —</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td><span style="color:${meta.color}">●</span> ${meta.label}</td>
+      <td>${s.n}</td>
+      <td>${(+s.slope).toExponential(3)}</td>
+      <td>${(+s.intercept).toExponential(3)}</td>
+      <td>${(+s.dH).toFixed(2)}</td>
+      <td>${(+s.dS * 1000).toFixed(1)}</td>
+      <td>${(+s.dG_37).toFixed(2)}</td>
+      <td>${(+s.r_squared).toFixed(4)}</td>
+    </tr>`;
+  }).join('');
 
   if (r.skipped && r.skipped.length) {
     const lines = r.skipped.map(s => `${s.name}: ${s.reason}`).join(' · ');
@@ -860,7 +922,9 @@ function renderConcentrationResults(r) {
 function accumulateColumnResult(r) {
   const col = r.name || document.getElementById('colSelect').value;
   if (!col) return;
+  const prev = colResults[col] || {};
   colResults[col] = {
+    ...prev,
     TmRaw:  r.TmRaw,
     vh:     r.vantHoff?.success ? r.vantHoff    : null,
     fit:    r.fit_result?.success ? r.fit_result : null,
@@ -887,6 +951,10 @@ function renderColResults() {
       <td>${fmt(e.fit?.dH)}</td>
       <td>${e.fit ? fmt(e.fit.dS * 1000, 1) : '—'}</td>
       <td>${fmt(e.fit?.dG)}</td>
+      <td>${fmt(e.multi?.T_m_fit)}</td>
+      <td>${fmt(e.multi?.dH)}</td>
+      <td>${e.multi ? fmt(e.multi.dS * 1000, 1) : '—'}</td>
+      <td>${fmt(e.multi?.dG)}</td>
       <td><button onclick="removeColResult('${c.replace(/'/g, "\\'")}')" class="text-muted hover:text-red-500 font-mono text-xs px-1">✕</button></td>
     </tr>`;
   }).join('');
@@ -953,12 +1021,13 @@ window.removeVhoff=function(i){
 // ── Download ──────────────────────────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click',()=>{
   const cols = Object.keys(colResults);
-  if (!cols.length) return;
+  if (!cols.length && !lastConcResult) return;
   const headers = [
     'column',
     'Tm_raw_C',
     'Tm_vH_C', 'dH_vH_kcal_mol', 'dS_vH_cal_molK', 'dG37_vH_kcal_mol',
     'Tm_fit_C', 'dH_fit_kcal_mol', 'dS_fit_cal_molK', 'dG37_fit_kcal_mol',
+    'Tm_multi_C', 'dH_multi_kcal_mol', 'dS_multi_cal_molK', 'dG37_multi_kcal_mol',
   ];
   const cell = (v, scale=1) => (v == null || isNaN(v)) ? '' : (+v * scale).toString();
   const lines = [headers.join(',')];
@@ -967,10 +1036,67 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     lines.push([
       `"${c.replace(/"/g, '""')}"`,
       cell(e.TmRaw),
-      cell(e.vh?.T_m_vH),  cell(e.vh?.dH),  cell(e.vh?.dS, 1000),  cell(e.vh?.dG),
-      cell(e.fit?.T_m_fit),cell(e.fit?.dH), cell(e.fit?.dS, 1000), cell(e.fit?.dG),
+      cell(e.vh?.T_m_vH),    cell(e.vh?.dH),    cell(e.vh?.dS, 1000),    cell(e.vh?.dG),
+      cell(e.fit?.T_m_fit),  cell(e.fit?.dH),   cell(e.fit?.dS, 1000),   cell(e.fit?.dG),
+      cell(e.multi?.T_m_fit),cell(e.multi?.dH), cell(e.multi?.dS, 1000), cell(e.multi?.dG),
     ].join(','));
   }
+
+  if (lastConcResult) {
+    const cr     = lastConcResult;
+    const csers  = cr.series || {raw: cr.vantHoff, vh: null, fit: null};
+    const f      = cr.self_complementary ? 1 : 4;
+    const invK   = v => (v == null || !isFinite(v) || v <= 0) ? '' : (1 / v).toString();
+    lines.push('');
+    lines.push(`# concentration series (struct=${cr.struct_type}, self_complementary=${cr.self_complementary}, f=${f})`);
+    lines.push([
+      'column','CT_uM','CT_M','ln_CT_over_f',
+      'Tm_raw_C','inv_Tm_raw_K',
+      'Tm_vH_C','inv_Tm_vH_K',
+      'Tm_fit_C','inv_Tm_fit_K',
+    ].join(','));
+    cr.per_curve.forEach(c => {
+      lines.push([
+        `"${c.name.replace(/"/g, '""')}"`,
+        cell(c.oligoC),
+        cell(c.c0),
+        cell(c.lnCT),
+        cell(c.TmRaw),    invK(c.TmRaw_K ?? c.TmKelvin),
+        cell(c.TmvH),     invK(c.TmvH_K),
+        cell(c.Tmfit),    invK(c.Tmfit_K),
+      ].join(','));
+    });
+    lines.push('');
+    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared'].join(','));
+    [['raw','Tm_raw'], ['vh','Tm_vH'], ['fit','Tm_fit']].forEach(([key, lbl]) => {
+      const s = csers[key];
+      if (!s) {
+        lines.push([lbl, '0', '', '', '', '', '', ''].join(','));
+        return;
+      }
+      lines.push([
+        lbl,
+        String(s.n),
+        cell(s.slope),
+        cell(s.intercept),
+        cell(s.dH),
+        cell(s.dS, 1000),
+        cell(s.dG_37),
+        cell(s.r_squared),
+      ].join(','));
+    });
+    if (cr.skipped && cr.skipped.length) {
+      lines.push('');
+      lines.push(['skipped_column','reason'].join(','));
+      cr.skipped.forEach(s => {
+        lines.push([
+          `"${s.name.replace(/"/g, '""')}"`,
+          `"${(s.reason || '').replace(/"/g, '""')}"`,
+        ].join(','));
+      });
+    }
+  }
+
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'text/csv'}));
   a.download = 'rna_melt_results.csv';
@@ -979,7 +1105,11 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
 
 // ── Reset ─────────────────────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
-  dfLoaded=false; lastResult=null; vhoffPoints=[];
+  dfLoaded=false; lastResult=null; vhoffPoints=[]; lastConcResult=null;
+  document.getElementById('vhoffSection').classList.add('hidden');
+  document.getElementById('vhoffReg').classList.add('hidden');
+  document.getElementById('vhoffTableBody').innerHTML='';
+  document.getElementById('vhoffRegValues').innerHTML='';
   document.getElementById('uploadSection').style.display='';
   document.getElementById('resultsSection').classList.add('hidden');
   document.getElementById('fileInput').value='';
@@ -991,7 +1121,6 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
   document.getElementById('bl_lower_offset').value='10';
   document.getElementById('bl_upper_offset').value='10';
   //document.getElementById('fixBaselines').checked=false;
-  document.getElementById('vhoffSection').classList.add('hidden');
   for (const k of Object.keys(colResults)) delete colResults[k];
   renderColResults();
   Object.values(charts).forEach(c=>c?.destroy());

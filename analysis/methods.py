@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import least_squares
 from scipy import stats
+import re
 
 #import functions, constants
 from analysis import functions, constants
@@ -407,7 +408,7 @@ def fit_full_function_multi(
 #
 #        sol = sol + [T_m, dG_37, dH, dS]
 #    return sol
-
+#
 #def concentration_dependency(r_raw, r_VH, r_fit, T_scale = 1000.):
 #    results = {}
 #    for k in r_fit:
