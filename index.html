@@ -328,7 +328,7 @@ tailwind.config = {
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+        <div id="alphaTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
         <canvas id="chartAlpha" style="max-height:420px"></canvas>
       </div>
 
@@ -469,8 +469,11 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
       `${info.rows} rows · T: ${info.T_min.toFixed(1)}–${info.T_max.toFixed(1)} °C · ${info.sig_cols.length} signal column(s)`;
     const sel = document.getElementById('colSelect');
     const cols = info.sig_cols;
-    const multiOpt = cols.length > 1 ? `<option value="__multi__">multi (all columns)</option>` : '';
-    sel.innerHTML = cols.map(c=>`<option value="${c}">${c}</option>`).join('') + multiOpt;
+    const extraOpts = cols.length > 1
+      ? `<option value="__multi__">multi (shared ΔH fit)</option>`
+      + `<option value="__concentration__">concentration series (1/Tm vs ln C_T)</option>`
+      : '';
+    sel.innerHTML = cols.map(c=>`<option value="${c}">${c}</option>`).join('') + extraOpts;
     document.getElementById('colSection').style.display = cols.length > 1 ? '' : 'none';
     buildMultiCTInputs(cols);
     updateCTBlocks();
@@ -503,9 +506,10 @@ function buildMultiCTInputs(cols) {
 }
 
 function updateCTBlocks() {
-  const isMulti = document.getElementById('colSelect').value === '__multi__';
-  document.getElementById('singleCTBlock').style.display = isMulti ? 'none' : '';
-  document.getElementById('multiCTBlock').style.display  = isMulti ? ''     : 'none';
+  const v = document.getElementById('colSelect').value;
+  const isPerCol = (v === '__multi__' || v === '__concentration__');
+  document.getElementById('singleCTBlock').style.display = isPerCol ? 'none' : '';
+  document.getElementById('multiCTBlock').style.display  = isPerCol ? ''     : 'none';
 }
 
 async function runAnalysis() {
@@ -554,7 +558,14 @@ document.getElementById('autoBtn').addEventListener('click', () => {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderResults(r) {
-  if (r.is_multi) return renderMultiResults(r);
+  if (!r.is_concentration) {
+    document.getElementById('vhoffSection').classList.add('hidden');
+    hideInfo();
+    document.getElementById('alphaTitle').innerHTML =
+      `Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T`;
+  }
+  if (r.is_multi)         return renderMultiResults(r);
+  if (r.is_concentration) return renderConcentrationResults(r);
   const vh  = r.vantHoff;
   const fit = r.fit_result;
   const c0  = r.c0;
@@ -736,6 +747,116 @@ function renderMultiResults(r) {
   renderColResults();
 }
 
+function renderConcentrationResults(r) {
+  const vh = r.vantHoff;
+  const f  = r.self_complementary ? 1 : 4;
+
+  // ── Melting curves per column (raw + Tm marker) ───────────────────────
+  const meltSets = [];
+  r.per_curve.forEach((c, i) => {
+    const color = multiPalette[i % multiPalette.length];
+    meltSets.push({
+      label: `${c.name} · ${c.oligoC} µM`,
+      data: zip(r.T_all, c.signal_all),
+      borderColor: color,
+      borderWidth: 3,
+      pointRadius: 0, showLine: true, tension: 0,
+    });
+    // Tm marker — vertical from min to max signal at TmRaw
+    const ys = c.signal_all.filter(v => v != null && !isNaN(v));
+    if (ys.length && c.TmRaw != null) {
+      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      meltSets.push({
+        label: `${c.name} Tm`,
+        data: [{x: c.TmRaw, y: yMin}, {x: c.TmRaw, y: yMax}],
+        borderColor: color,
+        borderWidth: 1.5,
+        borderDash: [3, 3],
+        pointRadius: 0, showLine: true, order: -1,
+      });
+    }
+  });
+  meltRange.low  = r.T_used[0];
+  meltRange.high = r.T_used[r.T_used.length - 1];
+  rebuildChart('chartMelt', {
+    type: 'scatter', data: {datasets: meltSets},
+    options: scatterOpts('Temperature (°C)', 'Signal',
+      {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
+    ),
+    plugins: [analysisRangePlugin()],
+  });
+
+  // ── 1/Tm vs ln(C_T/f) regression on chartAlpha ───────────────────────
+  const xLabel = `ln(C_T/${f})`;
+  document.getElementById('alphaTitle').innerHTML =
+    `Concentration series &middot; 1/T<sub>m</sub> vs ln(C<sub>T</sub>/${f})`;
+  rebuildChart('chartAlpha', {
+    type: 'scatter',
+    data: {datasets: [
+      {
+        label: 'Linear fit',
+        data: vh.ln_ct_line.map((x, i) => ({x, y: vh.inv_tm_line[i]})),
+        borderColor: '#D55E00', borderWidth: 2.5, borderDash: [5, 3],
+        pointRadius: 0, showLine: true,
+      },
+      {
+        label: 'Data',
+        data: vh.ln_ct.map((x, i) => ({x, y: vh.inv_tm[i]})),
+        borderColor: '#1a6b4a',
+        backgroundColor: '#1a6b4a',
+        pointRadius: 5, showLine: false,
+      },
+    ]},
+    options: scatterOpts(xLabel, '1/Tm (K⁻¹)', {
+      plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}},
+    }),
+  });
+
+  // Hide derivative chart — not meaningful for this view.
+  if (charts.chartDeriv) { charts.chartDeriv.destroy(); delete charts.chartDeriv; }
+
+  // ── Result cards ──────────────────────────────────────────────────────
+  let html = '';
+  html += card('ΔH° (conc. vH)',  vh.dH.toFixed(2), null, 'kcal/mol');
+  html += card('ΔS° (conc. vH)',  (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (conc. vH)', vh.dG_37.toFixed(2), null, 'kcal/mol');
+  html += card('R²',  vh.r_squared.toFixed(4), null, '');
+  html += card('n points', r.per_curve.length, null, '');
+  document.getElementById('resultsGrid').innerHTML = html;
+  document.getElementById('fitResults').classList.remove('hidden');
+
+  // ── Per-curve table + regression panel via vhoffSection ───────────────
+  const sec = document.getElementById('vhoffSection');
+  sec.classList.remove('hidden');
+  document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map((c, i) => {
+    const ln_ct = vh.ln_ct[i];
+    return `<tr>
+      <td>${c.oligoC}</td>
+      <td>${c.TmRaw.toFixed(2)}</td>
+      <td>${(1 / c.TmKelvin).toExponential(5)}</td>
+      <td>${ln_ct.toFixed(4)}</td>
+      <td></td>
+    </tr>`;
+  }).join('');
+  const reg = document.getElementById('vhoffReg');
+  reg.classList.remove('hidden');
+  document.getElementById('vhoffRegValues').innerHTML = `
+    <div><div class="text-xs text-muted">slope</div><div class="font-medium">${vh.slope.toExponential(3)} K⁻¹</div></div>
+    <div><div class="text-xs text-muted">intercept</div><div class="font-medium">${vh.intercept.toExponential(3)} K⁻¹</div></div>
+    <div><div class="text-xs text-muted">ΔH°</div><div class="font-medium">${vh.dH.toFixed(2)} kcal/mol</div></div>
+    <div><div class="text-xs text-muted">ΔS°</div><div class="font-medium">${(vh.dS * 1000).toFixed(1)} cal/(mol·K)</div></div>
+    <div><div class="text-xs text-muted">ΔG°₃₇</div><div class="font-medium">${vh.dG_37.toFixed(2)} kcal/mol</div></div>
+    <div><div class="text-xs text-muted">R²</div><div class="font-medium">${vh.r_squared.toFixed(4)}</div></div>
+    <div><div class="text-xs text-muted">f factor</div><div class="font-medium">${f} <span class="text-muted text-xs">(${r.self_complementary ? 'self-complementary' : 'non-self-complementary'})</span></div></div>`;
+
+  if (r.skipped && r.skipped.length) {
+    const lines = r.skipped.map(s => `${s.name}: ${s.reason}`).join(' · ');
+    showInfo(`Skipped ${r.skipped.length} column(s) — ${lines}`);
+  } else {
+    hideInfo();
+  }
+}
+
 function accumulateColumnResult(r) {
   const col = r.name || document.getElementById('colSelect').value;
   if (!col) return;
@@ -882,16 +1003,18 @@ function collectParams() {
   const g=id=>{ const v=document.getElementById(id).value; return v===''?null:parseFloat(v); };
   const col = document.getElementById('colSelect').value || null;
   const isMulti = col === '__multi__';
+  const isConc  = col === '__concentration__';
+  const isPerCol = isMulti || isConc;
   const params={
     signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
-    structure_type:  document.querySelector('input[name="structType"]:checked')?.value  || 'monomer',
-    column:          col,
+    struct_type:     document.querySelector('input[name="structType"]:checked')?.value  || 'heterodimer',
+    column:          isMulti ? '__multi__' : isConc ? '__concentration__' : col,
     bl_lower_offset: g('bl_lower_offset') ?? 10,
     bl_upper_offset: g('bl_upper_offset') ?? 10,
-    salt:            isMulti ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
+    salt:            isPerCol ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
     oligo:           g('CT') ?? 0.5,
   };
-  if (isMulti) {
+  if (isPerCol) {
     const oligoMulti = {};
     document.querySelectorAll('.multi-ct').forEach(el => {
       const v = parseFloat(el.value);
@@ -1027,6 +1150,8 @@ function hideRunning(){
 }
 function showError(msg){ const b=document.getElementById('errorBanner'); b.textContent='⚠ '+msg; b.classList.remove('hidden'); }
 function hideError(){ document.getElementById('errorBanner').classList.add('hidden'); }
+function showInfo(msg){ const b=document.getElementById('infoBanner'); b.textContent=msg; b.classList.remove('hidden'); }
+function hideInfo(){ document.getElementById('infoBanner').classList.add('hidden'); }
 
 boot();
 </script>

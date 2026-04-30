@@ -30,7 +30,7 @@ import numpy as np
 #from scipy.signal import savgol_filter
 from analysis.utils import safe_json
 #from analysis.util import analyze
-from analysis import methods, functions
+from analysis import methods, functions, constants
 
 # ─── Main entry point ────────────────────────────────────────────────────────
 
@@ -56,6 +56,8 @@ def run(df, params: dict):# -> dict:
     col = params.get("column", sig_cols[0])
     if col in ('multi', '__multi__'):
         return _run_multi(df, params, T_all, sig_cols)
+    elif col in ('concentration', '__concentration__'):
+        return _run_concentration(df, params, T_all, sig_cols)
     else:
         if col not in df.columns:
             col = sig_cols[0]
@@ -293,4 +295,139 @@ def _run_multi(df, params: dict, T_all, sig_cols):
         "dH":         dH,
         "dS":         dS,
         "columns":    columns,
+    })
+
+
+def _run_concentration(df, params: dict, T_all, sig_cols):
+    """Concentration-series van't Hoff: extract Tm per column, regress 1/Tm vs ln(C_T/f)."""
+    struct_type = params.get("struct_type", "heterodimer")
+    if struct_type == "monomer":
+        return {
+            "name": "Concentration Series",
+            "error": "Concentration-series van't Hoff is not applicable to monomers — Tm is concentration-independent for intramolecular folding.",
+        }
+    self_comp = (struct_type == "homodimer")
+
+    oligo_multi = params.get("oligo_multi") or {}
+    salt_c      = float(params.get("salt", 150))
+
+    T_min, T_max = float(T_all.min()), float(T_all.max())
+    T_low  = float(params.get("T_low",  T_min))
+    T_high = float(params.get("T_high", T_max))
+
+    pos_start = int(np.where(T_all == T_low)[0][0])
+    pos_end   = int(np.where(T_all == T_high)[0][0]) + 1
+    TT        = T_all[pos_start:pos_end]
+
+    base_b_offset  = float(params.get("bl_lower_offset", 0))
+    base_ub_offset = float(params.get("bl_upper_offset", 0))
+    r_base_b_maxT  = T_low  + base_b_offset
+    r_base_ub_minT = T_high - base_ub_offset
+
+    per_curve = []
+    skipped   = []
+    tm_K_arr  = []
+    ct_M_arr  = []
+
+    for col in sig_cols:
+        sig = df[col].values.astype(float)
+        if np.isnan(sig).any():
+            skipped.append({"name": col, "reason": "contains NaN"})
+            continue
+        if col not in oligo_multi:
+            skipped.append({"name": col, "reason": "no concentration provided"})
+            continue
+        try:
+            oligo_uM = float(oligo_multi[col])
+        except (TypeError, ValueError):
+            skipped.append({"name": col, "reason": "non-numeric concentration"})
+            continue
+        if not np.isfinite(oligo_uM) or oligo_uM <= 0:
+            skipped.append({"name": col, "reason": f"non-positive concentration {oligo_uM}"})
+            continue
+
+        used_data = sig[pos_start:pos_end]
+        try:
+            T_m_C, _, base_b, base_ub, _ = methods.T_m_ds_raw(
+                TT,
+                used_data,
+                baseline_bound_maxT=r_base_b_maxT,
+                baseline_unbound_minT=r_base_ub_minT,
+            )
+        except Exception as e:
+            skipped.append({"name": col, "reason": f"Tm extraction failed: {e}"})
+            continue
+
+        if T_m_C is None or not np.isfinite(T_m_C) or not (T_low <= T_m_C <= T_high):
+            skipped.append({"name": col, "reason": f"Tm out of window ({T_m_C})"})
+            continue
+
+        c_M   = 1e-6 * oligo_uM * 2          # match c0 convention used elsewhere in this file
+        T_m_K = T_m_C - constants.T0          # Celsius → Kelvin (T0 is -273.15)
+
+        per_curve.append({
+            "name":        col,
+            "oligoC":      oligo_uM,
+            "c0":          c_M,
+            "TmRaw":       float(T_m_C),
+            "TmKelvin":    float(T_m_K),
+            "T_used":      TT,
+            "signal":      used_data,
+            "signal_all":  sig,
+            "base_b_r":    base_b,
+            "base_ub_r":   base_ub,
+        })
+        tm_K_arr.append(T_m_K)
+        ct_M_arr.append(c_M)
+
+    if len(tm_K_arr) < 2:
+        return safe_json({
+            "name": "Concentration Series",
+            "error": f"Need at least 2 valid (Tm, C_T) points; got {len(tm_K_arr)}.",
+            "per_curve": per_curve,
+            "skipped":   skipped,
+        })
+
+    try:
+        vh = methods.vant_hoff_concentration(
+            np.array(tm_K_arr),
+            np.array(ct_M_arr),
+            self_complementary=self_comp,
+        )
+    except ValueError as e:
+        return safe_json({
+            "name": "Concentration Series",
+            "error": str(e),
+            "per_curve": per_curve,
+            "skipped":   skipped,
+        })
+
+    ln_ct_min = float(vh["ln_ct"].min())
+    ln_ct_max = float(vh["ln_ct"].max())
+    ln_ct_line = np.linspace(ln_ct_min, ln_ct_max, 50)
+    inv_tm_line = vh["slope"] * ln_ct_line + vh["intercept"]
+
+    return safe_json({
+        "name":               "concentration",
+        "is_concentration":   True,
+        "struct_type":        struct_type,
+        "self_complementary": self_comp,
+        "saltC":              salt_c,
+        "T_all":              T_all,
+        "T_used":              TT,
+        "per_curve":          per_curve,
+        "skipped":            skipped,
+        "vantHoff": {
+            "success":     True,
+            "dH":          vh["dH"],
+            "dS":          vh["dS"],
+            "dG_37":       vh["dG_37"],
+            "r_squared":   vh["r_squared"],
+            "slope":       vh["slope"],
+            "intercept":   vh["intercept"],
+            "ln_ct":       vh["ln_ct"],
+            "inv_tm":      vh["inv_tm"],
+            "ln_ct_line":  ln_ct_line,
+            "inv_tm_line": inv_tm_line,
+        },
     })
