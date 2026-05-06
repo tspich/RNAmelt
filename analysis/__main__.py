@@ -5,9 +5,9 @@ Usage
     python -m analysis FILE.csv [options]
 
 The CLI loads the CSV, runs `analysis.cleaning.clean`, and dispatches to
-`analysis.analysis_melting.run` with the same param dict the browser bridge
-builds. The full result is printed as JSON on stdout; pass `--csv-out PATH`
-to also write a results CSV in the format produced by the browser download.
+the appropriate `analysis.api` function. The full result is printed as
+JSON on stdout; pass `--csv-out PATH` to also write a results CSV in the
+format produced by the browser download.
 """
 
 import argparse
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from analysis import analysis_melting
-from analysis.cleaning import clean
+from analysis import analyze_concentration, analyze_multi, analyze_single
+from analysis.cleaning import clean, get_signal_columns
 
 
 def _parse_oligo_multi(values):
@@ -77,25 +77,17 @@ def _build_argparser():
     return p
 
 
-def _build_params(args):
-    params = {
-        "signal_type":     args.signal_type,
+def _common_kwargs(args):
+    """Kwargs shared by analyze_single / analyze_multi / analyze_concentration."""
+    return {
         "struct_type":     args.struct_type,
+        "signal_type":     args.signal_type,
+        "salt":            args.salt,
+        "T_low":           args.T_low,
+        "T_high":          args.T_high,
         "bl_lower_offset": args.bl_lower,
         "bl_upper_offset": args.bl_upper,
-        "salt":            args.salt,
-        "oligo":           args.oligo,
     }
-    if args.column is not None:
-        params["column"] = args.column
-    if args.T_low  is not None: params["T_low"]  = args.T_low
-    if args.T_high is not None: params["T_high"] = args.T_high
-
-    oligo_multi = _parse_oligo_multi(args.oligo_multi)
-    if oligo_multi:
-        params["oligo_multi"] = oligo_multi
-
-    return params
 
 
 # ── CSV writer mirroring the browser download ─────────────────────────────
@@ -247,11 +239,30 @@ def main(argv=None):
 
     df = pd.read_csv(args.csv)
     df = clean(df)
-    params = _build_params(args)
+    oligo_multi = _parse_oligo_multi(args.oligo_multi)
+    common = _common_kwargs(args)
 
     # The orchestrator emits debug prints; route them to stderr so stdout stays JSON.
     with contextlib.redirect_stdout(sys.stderr):
-        result = analysis_melting.run(df, params)
+        if args.column == "__multi__":
+            if not oligo_multi:
+                print("error: --column __multi__ needs at least one --oligo-multi NAME=VAL", file=sys.stderr)
+                return 2
+            result = analyze_multi(df, oligo_multi, **common)
+        elif args.column == "__concentration__":
+            if not oligo_multi:
+                print("error: --column __concentration__ needs at least one --oligo-multi NAME=VAL", file=sys.stderr)
+                return 2
+            result = analyze_concentration(df, oligo_multi, **common)
+        else:
+            column = args.column
+            if column is None:
+                sigs = get_signal_columns(df)
+                if not sigs:
+                    print("error: CSV has no signal columns", file=sys.stderr)
+                    return 2
+                column = sigs[0]
+            result = analyze_single(df, column, oligo=args.oligo, **common)
 
     indent = args.indent if args.indent and args.indent > 0 else None
     json.dump(result, sys.stdout, indent=indent, default=str)

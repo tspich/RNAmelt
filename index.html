@@ -285,8 +285,18 @@ tailwind.config = {
 
 <!-- ════════════════════ MAIN ════════════════════ -->
 <main class="flex-1 p-8 overflow-x-hidden min-w-0">
-  <h1 class="text-xl font-semibold tracking-tight mb-1">RNA Melting Analysis</h1>
-  <p class="text-sm text-muted mb-6">Two-state model · Van't Hoff thermodynamics · Baseline correction</p>
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight mb-1">RNA Melting Analysis</h1>
+      <p class="text-sm text-muted">Two-state model · Van't Hoff thermodynamics · Baseline correction</p>
+    </div>
+    <a href="help.html" target="_blank" rel="noopener"
+       class="shrink-0 mt-1 inline-flex items-center gap-1.5 text-xs font-mono text-muted hover:text-accent transition"
+       title="Open the help page in a new tab">
+      <span class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-current text-[10px] font-semibold">?</span>
+      Help
+    </a>
+  </div>
 
   <!-- Banners -->
   <div id="runningBanner" class="hidden mb-4 items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
