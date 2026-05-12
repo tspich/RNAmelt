@@ -101,6 +101,7 @@ tailwind.config = {
         <a class="toc-link indent" href="#csv-format">CSV format</a>
         <a class="toc-link indent" href="#workflow">Workflow</a>
         <a class="toc-link indent" href="#modes">Analysis modes</a>
+        <a class="toc-link indent" href="#charts">Chart interactions</a>
         <a class="toc-link indent" href="#download">Download</a>
         <a class="toc-link" href="#cli">2. CLI</a>
         <a class="toc-link indent" href="#cli-run">Running</a>
@@ -161,6 +162,19 @@ tailwind.config = {
           </tbody>
         </table>
 
+        <h3 id="charts">Chart interactions</h3>
+        <p>All three plots (melting curve, van't Hoff / concentration regression, derivative) are interactive:</p>
+        <table>
+          <thead><tr><th>Action</th><th>Gesture</th></tr></thead>
+          <tbody>
+            <tr><td>Zoom in / out</td><td>Mouse wheel scroll over the chart</td></tr>
+            <tr><td>Pan</td><td>Click and drag inside the chart area</td></tr>
+            <tr><td>Pinch zoom</td><td>Two-finger pinch on touch devices</td></tr>
+            <tr><td>Reset view</td><td>Click the <code>⤢ reset</code> button in the chart header</td></tr>
+          </tbody>
+        </table>
+        <p>Zooming and panning act on both axes simultaneously. The shaded analysis-window overlay on the melting-curve plot follows the zoom — useful for inspecting the baseline regions or the steep part of the transition without re-running the fit.</p>
+
         <h3 id="download">Download results</h3>
         <p>The <strong>Download CSV</strong> button saves a results file containing a per-column block (raw / vH / full-fit / multi columns) and, for concentration mode, an additional block with the per-curve table and the three regressions.</p>
       </section>
@@ -176,20 +190,23 @@ tailwind.config = {
         <p><code>python -m analysis --help</code> lists every flag. Exit codes: <code>0</code> on success, <code>1</code> if the analysis returns an error, <code>2</code> on bad input.</p>
 
         <h3 id="cli-examples">Examples</h3>
+        <p>Default — van't Hoff + full fit on every signal column in the file:</p>
+<pre><code>python -m analysis melt.csv --csv-out batch.csv</code></pre>
+
         <p>Single column:</p>
 <pre><code>python -m analysis melt.csv \
   --column sample_1 --struct-type heterodimer \
   --oligo 5.0 --T-low 20 --T-high 90 \
   --csv-out single.csv</code></pre>
 
-        <p>Shared-ΔH fit across columns:</p>
+        <p>Shared-ΔH fit across columns (defaults to all columns at <code>--oligo</code> when <code>--oligo-multi</code> is omitted):</p>
 <pre><code>python -m analysis melt.csv \
   --column __multi__ --struct-type heterodimer \
   --oligo-multi sample_1=0.5 \
   --oligo-multi sample_2=5.0 \
   --oligo-multi sample_3=50</code></pre>
 
-        <p>Concentration-series van't Hoff:</p>
+        <p>Concentration-series van't Hoff (requires <code>--oligo-multi</code> &mdash; varying C<sub>T</sub> is the whole point):</p>
 <pre><code>python -m analysis melt.csv \
   --column __concentration__ --struct-type heterodimer \
   --oligo-multi sample_1=0.5 \
@@ -202,7 +219,7 @@ tailwind.config = {
           <thead><tr><th>Flag</th><th>Default</th><th>Notes</th></tr></thead>
           <tbody>
             <tr><td><code>csv</code> <span class="text-muted">(positional)</span></td><td>—</td><td>CSV path</td></tr>
-            <tr><td><code>--column</code></td><td>first signal column</td><td><code>__multi__</code> / <code>__concentration__</code> for multi-column modes</td></tr>
+            <tr><td><code>--column</code></td><td>(omit &rarr; all columns)</td><td>Run single-mode (vH + full fit) on every signal column when omitted. Pass a column name for one column, <code>__multi__</code> for shared-ΔH joint fit, or <code>__concentration__</code> for the 1/Tm vs ln(C<sub>T</sub>/f) series.</td></tr>
             <tr><td><code>--struct-type</code></td><td><code>heterodimer</code></td><td><code>heterodimer</code> · <code>homodimer</code> · <code>monomer</code></td></tr>
             <tr><td><code>--signal-type</code></td><td><code>absorbance</code></td><td><code>absorbance</code> · <code>fluorescence</code></td></tr>
             <tr><td><code>--T-low</code> / <code>--T-high</code></td><td>data range</td><td>Transition window (°C)</td></tr>

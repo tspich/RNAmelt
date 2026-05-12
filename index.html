@@ -8,6 +8,8 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -333,17 +335,26 @@ tailwind.config = {
     <div class="grid grid-cols-2 gap-4 mb-5">
 
       <div class="col-span-2 bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Melting curve · raw + two-state fit + baselines</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div class="text-xs font-semibold uppercase tracking-wider text-muted">Melting curve · raw + two-state fit + baselines</div>
+          <button data-reset-chart="chartMelt" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartMelt" style="max-height:480px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div id="alphaTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div id="alphaTitle" class="text-xs font-semibold uppercase tracking-wider text-muted">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+          <button data-reset-chart="chartAlpha" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartAlpha" style="max-height:420px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">dA/dT derivative · Tm estimate</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted">dA/dT derivative · Tm estimate</div>
+          <button data-reset-chart="chartDeriv" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartDeriv" style="max-height:420px"></canvas>
       </div>
 
@@ -422,10 +433,17 @@ tailwind.config = {
     </div>
 
     <!-- Export -->
-    <button id="downloadBtn"
-      class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90">
-      ⬇ Download results CSV
-    </button>
+    <div class="flex flex-wrap gap-2">
+      <button id="downloadBtn"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90">
+        ⬇ Download results CSV
+      </button>
+      <button id="downloadPlotsBtn"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90"
+        title="Download each visible chart as a PNG (capturing current zoom / pan state)">
+        ⬇ Download plots (PNG)
+      </button>
+    </div>
 
   </div>
 </main>
@@ -447,6 +465,12 @@ const PYTHON_MODULES = [
 let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
 const colResults={};
 const charts={};
+
+// Per-column sidebar parameter memory: first visit → defaults, return visit → previous values.
+const colParams = {};
+let   activeCol = null;
+let   dataTRange = {min: null, max: null};
+const PERSISTED_PARAM_IDS = ['T_low','T_high','bl_lower_offset','bl_upper_offset','CT'];
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -516,6 +540,10 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
     document.getElementById('colSection').style.display = cols.length > 1 ? '' : 'none';
     buildMultiCTInputs(cols);
     updateCTBlocks();
+    // Reset per-column param memory for the new file.
+    Object.keys(colParams).forEach(k => delete colParams[k]);
+    dataTRange = {min: info.T_min, max: info.T_max};
+    activeCol  = sel.value;
     setIfEmpty('T_low',  (info.T_min).toFixed(1));
     setIfEmpty('T_high', (info.T_max).toFixed(1));
     initTRangeSlider(info.T_min, info.T_max);
@@ -530,9 +558,45 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
 // ── Run ───────────────────────────────────────────────────────────────────────
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
 document.getElementById('colSelect').addEventListener('change', () => {
+  const newCol = document.getElementById('colSelect').value;
+  // Save the column we're leaving, then restore (or seed defaults for) the new one.
+  snapshotColParams(activeCol);
+  applyColParams(colParams[newCol] || defaultColParams());
+  if (!colParams[newCol]) snapshotColParams(newCol);
+  activeCol = newCol;
   updateCTBlocks();
   runAnalysis();
 });
+
+function snapshotColParams(col) {
+  if (!col) return;
+  const snap = {};
+  PERSISTED_PARAM_IDS.forEach(id => {
+    snap[id] = document.getElementById(id).value;
+  });
+  colParams[col] = snap;
+}
+
+function defaultColParams() {
+  const fmt = v => (v == null ? '' : (+v).toFixed(1));
+  return {
+    T_low:           fmt(dataTRange.min),
+    T_high:          fmt(dataTRange.max),
+    bl_lower_offset: '10',
+    bl_upper_offset: '10',
+    CT:              '0.5',
+  };
+}
+
+function applyColParams(p) {
+  PERSISTED_PARAM_IDS.forEach(id => {
+    document.getElementById(id).value = p[id] ?? '';
+  });
+  // Sync the dual-range slider after T_low / T_high change.
+  ['T_low','T_high'].forEach(id => {
+    document.getElementById(id).dispatchEvent(new Event('change'));
+  });
+}
 
 function buildMultiCTInputs(cols) {
   const grid = document.getElementById('multiCTGrid');
@@ -586,11 +650,9 @@ json.dumps(_am.run(_df_global, _params))
 }
 
 document.getElementById('autoBtn').addEventListener('click', () => {
-  ['T_low','T_high'].forEach(id => document.getElementById(id).value='');
-  document.getElementById('CT').value='0.5';
+  applyColParams(defaultColParams());
   document.getElementById('saltConc').value='150';
-  document.getElementById('bl_lower_offset').value='10';
-  document.getElementById('bl_upper_offset').value='10';
+  snapshotColParams(activeCol);
   //document.getElementById('fixBaselines').checked=false;
   runAnalysis();
 });
@@ -667,10 +729,10 @@ function renderResults(r) {
     const yMin = Math.min(...validY, lnKaTm) - 0.5;
     const yMax = Math.max(...validY, lnKaTm) + 0.5;
 
-    console.log({
-      tm_x, xMin, xMax, lnKaTm, yMin, yMax,
-      vh_T_m_vH: vh.T_m_vH, c0
-    });
+    // console.log({
+    //   tm_x, xMin, xMax, lnKaTm, yMin, yMax,
+    //   vh_T_m_vH: vh.T_m_vH, c0
+    // });
 
     rebuildChart('chartAlpha', {
       type:'scatter', data:{datasets:[
@@ -687,16 +749,24 @@ function renderResults(r) {
         },
       })
     });
+  } else if (charts.chartAlpha) {
+    charts.chartAlpha.destroy();
+    delete charts.chartAlpha;
   }
 
   // ── Derivative ────────────────────────────────────────────────────────
   document.getElementById('derivTitle').textContent = 'dF/dT derivative · Tm estimate';
-  rebuildChart('chartDeriv', {
-    type:'scatter', data:{datasets:[
-      {label:'dF/dT', data:zip(r.T_used, fit?.derivative||[]), borderColor:'#c0392b', borderWidth:3, pointRadius:0, showLine:true, tension:.3},
-    ]},
-    options:scatterOpts('Temperature (°C)', 'dF/dT')
-  });
+  if (fit?.success && Array.isArray(fit.derivative) && fit.derivative.length) {
+    rebuildChart('chartDeriv', {
+      type:'scatter', data:{datasets:[
+        {label:'dF/dT', data:zip(r.T_used, fit.derivative), borderColor:'#c0392b', borderWidth:3, pointRadius:0, showLine:true, tension:.3},
+      ]},
+      options:scatterOpts('Temperature (°C)', 'dF/dT')
+    });
+  } else if (charts.chartDeriv) {
+    charts.chartDeriv.destroy();
+    delete charts.chartDeriv;
+  }
 
   // ── Result cards ──────────────────────────────────────────────────────
   let html = '';
@@ -706,14 +776,16 @@ function renderResults(r) {
     html += card('ΔH° (vH)', vh.dH.toFixed(2), null, 'kcal/mol');
     html += card('ΔS° (vH)', (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
     html += card('ΔG°₃₇ (vH)', vh.dG.toFixed(2), null, 'kcal/mol');
+  } else if (vh && vh.success === false) {
+    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Van't Hoff analysis failed: ${vh.error || 'unknown error'}</div>`;
   }
   if (fit?.success) {
     html += card('Tₘ (fit)', fit.T_m_fit.toFixed(2), null, '°C');
     html += card('ΔH° (fit)', fit.dH.toFixed(2), null, 'kcal/mol');
     html += card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
     html += card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), null, 'kcal/mol');
-  } else if (fit?.error) {
-    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error}</div>`;
+  } else if (fit && fit.success === false) {
+    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error || 'unknown error'}</div>`;
   }
   if (r.TmRaw != null) html += card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C');
   document.getElementById('resultsGrid').innerHTML = html;
@@ -1114,6 +1186,35 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
   a.click();
 });
 
+// ── Download plots ────────────────────────────────────────────────────────────
+document.getElementById('downloadPlotsBtn').addEventListener('click', () => {
+  const slug = s => (s || 'rna_melt')
+    .toString()
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'rna_melt';
+
+  let prefix = 'rna_melt';
+  if (lastConcResult) prefix = 'rna_melt_concentration';
+  else if (lastResult?.is_multi) prefix = 'rna_melt_multi';
+  else if (lastResult?.name)     prefix = `rna_melt_${slug(lastResult.name)}`;
+
+  const labels = {chartMelt: 'curve', chartAlpha: 'vant_hoff', chartDeriv: 'derivative'};
+  let n = 0;
+  for (const id of ['chartMelt', 'chartAlpha', 'chartDeriv']) {
+    const c = charts[id];
+    if (!c || !c.canvas) continue;
+    const a = document.createElement('a');
+    a.href     = c.toBase64Image('image/png', 1.0);
+    a.download = `${prefix}_${labels[id]}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    n++;
+  }
+  if (!n) showError('No plots to download — run an analysis first.');
+});
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
   dfLoaded=false; lastResult=null; vhoffPoints=[]; lastConcResult=null;
@@ -1217,14 +1318,32 @@ function rebuildChart(id,config){
   if(ctx) charts[id]=new Chart(ctx,config);
 }
 
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.resetZoomBtn');
+  if (!btn) return;
+  const id = btn.dataset.resetChart;
+  const c  = charts[id];
+  if (c && typeof c.resetZoom === 'function') c.resetZoom();
+});
+
+function zoomPluginCfg(){
+  return {
+    zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'xy'},
+    pan:{enabled:true,mode:'xy',threshold:5},
+  };
+}
+
 function scatterOpts(xLabel,yLabel,extra={}){
+  const {plugins:extraPlugins, scales:extraScales, ...rest} = extra;
   return {
     responsive:true, animation:{duration:300},
-    plugins:{legend:{display:false},...(extra.plugins||{})},
+    ...rest,
+    plugins:{legend:{display:false},zoom:zoomPluginCfg(),...(extraPlugins||{})},
     scales:{
       x:{title:{display:true,text:xLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
       y:{title:{display:true,text:yLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
-    },...extra,
+      ...(extraScales||{}),
+    },
   };
 }
 

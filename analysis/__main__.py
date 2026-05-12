@@ -48,9 +48,12 @@ def _build_argparser():
     p.add_argument("csv", type=Path, help="CSV: temperature column + one or more signal columns")
     p.add_argument(
         "--column", default=None,
-        help="Signal column to fit. Use '__multi__' for shared-ΔH fit across all columns "
-             "or '__concentration__' for the 1/Tm vs ln(C_T/f) series. "
-             "Default: first signal column.",
+        help="Signal column to fit. Omit to run single-mode analysis "
+             "(van't Hoff + full fit) on every signal column in the CSV. "
+             "Pass '__multi__' for the shared-ΔH joint fit (defaults to all "
+             "columns at --oligo if no --oligo-multi is given) or "
+             "'__concentration__' for the 1/Tm vs ln(C_T/f) series "
+             "(requires --oligo-multi).",
     )
     p.add_argument("--struct-type", default="heterodimer",
                    choices=["heterodimer", "homodimer", "monomer"])
@@ -116,10 +119,25 @@ def _inv_K(v):
     return repr(1.0 / x)
 
 
+def _single_row(sub):
+    """Build one CSV row dict from a single-mode result."""
+    vh  = sub.get("vantHoff")   or {}
+    fit = sub.get("fit_result") or {}
+    return {
+        "TmRaw": sub.get("TmRaw"),
+        "vh":    vh  if vh.get("success")  else None,
+        "fit":   fit if fit.get("success") else None,
+        "multi": None,
+    }
+
+
 def _per_column_rows(result):
     """Return (column_name -> {TmRaw, vh, fit, multi}) for a single run."""
     rows = {}
-    if result.get("is_multi"):
+    if result.get("is_batch"):
+        for name, sub in (result.get("results") or {}).items():
+            rows[name] = _single_row(sub)
+    elif result.get("is_multi"):
         for c in result.get("columns", []):
             rows[c["name"]] = {
                 "TmRaw": None, "vh": None, "fit": None,
@@ -134,14 +152,7 @@ def _per_column_rows(result):
         # single-column run
         name = result.get("name")
         if name:
-            vh  = result.get("vantHoff")   or {}
-            fit = result.get("fit_result") or {}
-            rows[name] = {
-                "TmRaw": result.get("TmRaw"),
-                "vh":    vh  if vh.get("success")  else None,
-                "fit":   fit if fit.get("success") else None,
-                "multi": None,
-            }
+            rows[name] = _single_row(result)
     return rows
 
 
@@ -239,30 +250,40 @@ def main(argv=None):
 
     df = pd.read_csv(args.csv)
     df = clean(df)
+    #TODO: if values is None parse all available signals
     oligo_multi = _parse_oligo_multi(args.oligo_multi)
     common = _common_kwargs(args)
+
+    sigs = get_signal_columns(df)
 
     # The orchestrator emits debug prints; route them to stderr so stdout stays JSON.
     with contextlib.redirect_stdout(sys.stderr):
         if args.column == "__multi__":
             if not oligo_multi:
-                print("error: --column __multi__ needs at least one --oligo-multi NAME=VAL", file=sys.stderr)
-                return 2
-            result = analyze_multi(df, oligo_multi, **common)
-        elif args.column == "__concentration__":
-            if not oligo_multi:
-                print("error: --column __concentration__ needs at least one --oligo-multi NAME=VAL", file=sys.stderr)
-                return 2
-            result = analyze_concentration(df, oligo_multi, **common)
-        else:
-            column = args.column
-            if column is None:
-                sigs = get_signal_columns(df)
                 if not sigs:
                     print("error: CSV has no signal columns", file=sys.stderr)
                     return 2
-                column = sigs[0]
-            result = analyze_single(df, column, oligo=args.oligo, **common)
+                # Default: every signal column at the global --oligo concentration.
+                oligo_multi = {c: args.oligo for c in sigs}
+            result = analyze_multi(df, oligo_multi, **common)
+        elif args.column == "__concentration__":
+            if not oligo_multi:
+                print("error: --column __concentration__ needs at least one "
+                      "--oligo-multi NAME=VAL (concentration must vary across columns)",
+                      file=sys.stderr)
+                return 2
+            result = analyze_concentration(df, oligo_multi, **common)
+        elif args.column is not None:
+            result = analyze_single(df, args.column, oligo=args.oligo, **common)
+        else:
+            # Default: van't Hoff + full fit on every signal column.
+            if not sigs:
+                print("error: CSV has no signal columns", file=sys.stderr)
+                return 2
+            per_col = {}
+            for c in sigs:
+                per_col[c] = analyze_single(df, c, oligo=args.oligo, **common)
+            result = {"is_batch": True, "results": per_col, "columns": sigs}
 
     indent = args.indent if args.indent and args.indent > 0 else None
     json.dump(result, sys.stdout, indent=indent, default=str)
@@ -271,6 +292,15 @@ def main(argv=None):
     if isinstance(result, dict) and result.get("error"):
         print(f"error: {result['error']}", file=sys.stderr)
         return 1
+
+    if result.get("is_batch"):
+        failures = [n for n, r in (result.get("results") or {}).items() if r.get("error")]
+        if failures and len(failures) == len(result.get("results") or {}):
+            print(f"error: all {len(failures)} columns failed", file=sys.stderr)
+            return 1
+        if failures:
+            print(f"warning: {len(failures)}/{len(result['results'])} columns errored: "
+                  f"{', '.join(failures)}", file=sys.stderr)
 
     if args.csv_out:
         _write_csv(result, args.csv_out)

@@ -61,15 +61,19 @@ Same orchestrator, no browser needed. Result is JSON on stdout; pass
 download produces.
 
 ```bash
+# default: van't Hoff + full fit on every signal column in the CSV
+python -m analysis melt.csv --csv-out batch.csv
+
 # single column
 python -m analysis melt.csv --column sample_1 --struct-type heterodimer \
     --oligo 5.0 --T-low 20 --T-high 90 --csv-out single.csv
 
-# shared-ΔH fit across all signal columns
+# shared-ΔH fit across all signal columns (defaults to all columns at --oligo
+# if no --oligo-multi is given)
 python -m analysis melt.csv --column __multi__ --struct-type heterodimer \
     --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50
 
-# concentration-series van't Hoff (1/Tm vs ln(C_T/f))
+# concentration-series van't Hoff (1/Tm vs ln(C_T/f)) — requires --oligo-multi
 python -m analysis melt.csv --column __concentration__ --struct-type heterodimer \
     --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50 \
     --csv-out conc.csv

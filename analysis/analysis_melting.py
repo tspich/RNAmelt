@@ -111,46 +111,45 @@ def run(df, params: dict):# -> dict:
             baseline_unbound_minT=r_base_ub_minT,
             #debug=True
         )
-        print(T_m_raw, base_b_r, base_ub_r, base_med_r)
+        #print(T_m_raw, base_b_r, base_ub_r, base_med_r)
 
-        #try:
-        print(len(TT), len(used_data), len(T_all), len(signal_all))
-        print('c0', c0)
-        print('struct_type', struct_type)
+        try:
+            #print(len(TT), len(used_data), len(T_all), len(signal_all))
+            #print('c0', c0)
+            #print('struct_type', struct_type)
 
-        T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
-            TT,
-            used_data,
-            *base_b_r,
-            *base_ub_r,
-            c0,
-            border = 0.15,
-            #t1_min = t1_min,
-            #t1_max = t1_max
-            structType = struct_type,
-        )
+            T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
+                TT,
+                used_data,
+                *base_b_r,
+                *base_ub_r,
+                c0,
+                border = 0.15,
+                #t1_min = t1_min,
+                #t1_max = t1_max
+                structType = struct_type,
+            )
 
-        #print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
+            #print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
 
-        vantHoff = {
-            "success": True,
-            "dG":      dG_37_vH,
-            "dH":      dH_vH,
-            "dS":      dS_vH,
-            "T_m_vH":  T_m_vH,
-            "t1":      t1,
-            "K":       K,
-            "xdata":   xdata,
-            "ydata":   ydata,
-            "fit_vh":  fit_vh,
-        }
+            vantHoff = {
+                "success": True,
+                "dG":      dG_37_vH,
+                "dH":      dH_vH,
+                "dS":      dS_vH,
+                "T_m_vH":  T_m_vH,
+                "t1":      t1,
+                "K":       K,
+                "xdata":   xdata,
+                "ydata":   ydata,
+                "fit_vh":  fit_vh,
+            }
 
-        #except Exception as e:
-        #    vantHoff = {
-        #        "success": False,
-        #        "error":   str(e),
-        #    }
-        #    print('vantHoff', vantHoff)
+        except Exception as e:
+            vantHoff = {
+                "success": False,
+                "error":   str(e),
+            }
 
 
         if vantHoff['success']:
@@ -167,48 +166,48 @@ def run(df, params: dict):# -> dict:
             dH_init = -80
             dS_init = -0.2
 
-        #try:
-        #print(len(TT), TT[0], TT[-1])
-        #print(len(used_data), min(used_data), max(used_data))
-        #print('c0', c0)
-        #print('dH_init', dH_init)
-        #print('dS_init', dS_init)
+        try:
+            #print(len(TT), TT[0], TT[-1])
+            #print(len(used_data), min(used_data), max(used_data))
+            #print('c0', c0)
+            #print('dH_init', dH_init)
+            #print('dS_init', dS_init)
 
-        dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
-            TT,
-            used_data,
-            c0=c0,
-            dH_init = dH_init,
-            dS_init = dS_init,
-        )
+            dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
+                TT,
+                used_data,
+                c0=c0,
+                dH_init = dH_init,
+                dS_init = dS_init,
+            )
 
-        #print(dG_37_f, dH_f, dS_f, T_m_f)
+            #print(dG_37_f, dH_f, dS_f, T_m_f)
 
-        fit = np.array([ functions.full_function(
-            tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
-        ) for tt in TT ])
+            fit = np.array([ functions.full_function(
+                tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
+            ) for tt in TT ])
 
-        # NOTE: May need to check that, not general enough?
-        derivative = np.gradient(used_data, 0.5)/-1.
+            # NOTE: May need to check that, not general enough?
+            derivative = np.gradient(used_data, 0.5)/-1.
 
-        fit_result = {
-            "success":    True,
-            "dG":         dG_37_f,
-            "dH":         dH_f,
-            "dS":         dS_f,
-            "T_m_fit":    T_m_f,
-            "base_b_f":   base_b_f,
-            "base_ub_f":  base_ub_f,
-            "base_med_f": base_med_f,
-            "fit":        fit,
-            "derivative": derivative,
-        }
+            fit_result = {
+                "success":    True,
+                "dG":         dG_37_f,
+                "dH":         dH_f,
+                "dS":         dS_f,
+                "T_m_fit":    T_m_f,
+                "base_b_f":   base_b_f,
+                "base_ub_f":  base_ub_f,
+                "base_med_f": base_med_f,
+                "fit":        fit,
+                "derivative": derivative,
+            }
 
-        #except Exception as e:
-        #    fit_result = {
-        #        "success":    False,
-        #        "error":      str(e),
-        #    }
+        except Exception as e:
+            fit_result = {
+                "success":    False,
+                "error":      str(e),
+            }
 
 
         thermo_properties = {
