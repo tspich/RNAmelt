@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RNA Melt — Help</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg:      '#f4f3ef',
+        surface: '#ffffff',
+        surface2:'#f0efe9',
+        border:  '#dddbd3',
+        accent:  '#1a6b4a',
+        accent2: '#c0392b',
+        accent3: '#2471a3',
+        muted:   '#888880',
+        ink:     '#1a1a18',
+      },
+      fontFamily: {
+        sans: ['DM Sans', 'sans-serif'],
+        mono: ['DM Mono', 'monospace'],
+      },
+    }
+  }
+}
+</script>
+<style>
+  :root { --accent:#1a6b4a; --border:#dddbd3; --surface2:#f0efe9; --muted:#888880; }
+  body { background:#f4f3ef; color:#1a1a18; font-family:'DM Sans',sans-serif; }
+  pre, code { font-family:'DM Mono', monospace; }
+  pre {
+    background:var(--surface2); padding:14px 16px; border-radius:8px;
+    border:1px solid var(--border); overflow-x:auto;
+    font-size:.78rem; line-height:1.55;
+  }
+  code {
+    background:var(--surface2); padding:1px 5px;
+    border-radius:4px; font-size:.85em;
+  }
+  pre code { background:transparent; padding:0; font-size:1em; }
+  h2 {
+    font-size:1.4rem; font-weight:600;
+    margin-top:2.4rem; margin-bottom:.7rem;
+    padding-bottom:.4rem; border-bottom:1px solid var(--border);
+    scroll-margin-top:24px;
+  }
+  h3 {
+    font-size:1.05rem; font-weight:600;
+    margin-top:1.5rem; margin-bottom:.5rem;
+    color:var(--accent); scroll-margin-top:24px;
+  }
+  p, li { font-size:.92rem; line-height:1.6; }
+  ul.disc { list-style:disc; padding-left:1.4rem; }
+  ol.dec  { list-style:decimal; padding-left:1.4rem; }
+  ul.disc li, ol.dec li { margin-bottom:.3rem; }
+  table { border-collapse:collapse; margin:.8rem 0; font-size:.85rem; width:100%; }
+  th, td { padding:6px 12px; border:1px solid var(--border); text-align:left; vertical-align:top; }
+  th {
+    background:var(--surface2); font-family:'DM Mono',monospace;
+    font-size:.7rem; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--muted); font-weight:500;
+  }
+  .toc-link {
+    display:block; padding:5px 10px; font-size:.82rem;
+    color:var(--muted); border-radius:5px; text-decoration:none;
+  }
+  .toc-link:hover { background:var(--surface2); color:var(--accent); }
+  .toc-link.indent { padding-left:22px; font-size:.78rem; }
+  .formula {
+    background:var(--surface2); padding:14px 18px;
+    border-radius:8px; border:1px solid var(--border);
+    font-family:'DM Mono',monospace; font-size:.85rem; line-height:1.8;
+  }
+  a.inline { color:var(--accent); text-decoration:none; }
+  a.inline:hover { text-decoration:underline; }
+</style>
+</head>
+<body class="min-h-screen">
+<div class="max-w-6xl mx-auto px-6 py-8">
+
+  <header class="flex items-start justify-between mb-8 pb-5 border-b border-border gap-6">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">RNA Melt — Help</h1>
+      <p class="text-sm text-muted mt-1">How to run analyses in the browser, on the CLI, and from Python.</p>
+    </div>
+    <a href="index.html" class="text-sm font-mono text-accent hover:underline shrink-0 mt-1">← back to app</a>
+  </header>
+
+  <div class="flex gap-10">
+
+    <!-- Sticky TOC -->
+    <nav class="hidden lg:block w-56 shrink-0">
+      <div class="sticky top-6">
+        <div class="text-[.65rem] uppercase tracking-wider text-muted mb-2 font-mono px-2">Contents</div>
+        <a class="toc-link" href="#browser">1. Browser</a>
+        <a class="toc-link indent" href="#csv-format">CSV format</a>
+        <a class="toc-link indent" href="#workflow">Workflow</a>
+        <a class="toc-link indent" href="#modes">Analysis modes</a>
+        <a class="toc-link indent" href="#charts">Chart interactions</a>
+        <a class="toc-link indent" href="#download">Download</a>
+        <a class="toc-link" href="#cli">2. CLI</a>
+        <a class="toc-link indent" href="#cli-run">Running</a>
+        <a class="toc-link indent" href="#cli-examples">Examples</a>
+        <a class="toc-link indent" href="#cli-flags">Flags</a>
+        <a class="toc-link" href="#api">3. Python API</a>
+        <a class="toc-link indent" href="#api-functions">Functions</a>
+        <a class="toc-link indent" href="#api-result">Result shape</a>
+        <a class="toc-link" href="#model">Two-state model</a>
+      </div>
+    </nav>
+
+    <main class="flex-1 min-w-0">
+
+      <!-- ──────────────── BROWSER ──────────────── -->
+      <section id="browser">
+        <h2>1. Using the tool in the browser</h2>
+        <p>The browser interface runs the full analysis pipeline locally via <a class="inline" href="https://pyodide.org/" target="_blank" rel="noopener">Pyodide</a> (CPython compiled to WebAssembly). <strong>Your data never leaves your machine</strong> — there is no server, no upload.</p>
+
+        <h3 id="csv-format">CSV format</h3>
+        <p>Column 0 is temperature in °C (any header name). Columns 1+ are signal columns — absorbance or fluorescence. Rows where temperature is missing or all values are NaN are dropped.</p>
+<pre><code>temperature, sample_1, sample_2, sample_3
+20.0,        0.412,    0.388,    0.401
+20.5,        0.415,    0.391,    0.404
+...</code></pre>
+
+        <h3 id="workflow">Workflow</h3>
+        <ol class="dec">
+          <li>Drag &amp; drop a CSV onto the upload zone — or click to browse.</li>
+          <li>Pick a signal column from the dropdown, or switch to <code>__multi__</code> / <code>__concentration__</code> mode for multi-column analyses.</li>
+          <li>Use the dual-range slider to set the transition window <code>[T_low, T_high]</code> (°C).</li>
+          <li>Adjust the baseline offsets. Folded baseline is fit on <code>[T_low, T_low + lower offset]</code>, unfolded on <code>[T_high − upper offset, T_high]</code>.</li>
+          <li>Set strand concentration (µM) and salt (mM).</li>
+          <li>Click <strong>Run Analysis</strong>. Three Tm estimates are returned: raw (baseline intersection), van't Hoff linearisation, and the full nonlinear two-state fit.</li>
+        </ol>
+
+        <h3 id="modes">Three analysis modes</h3>
+        <table>
+          <thead>
+            <tr><th>Mode</th><th>Column dropdown</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Single column</strong></td>
+              <td>any signal column</td>
+              <td>Tm by baseline intersection, van't Hoff linearisation, and a full two-state nonlinear fit. Returns ΔH / ΔS / ΔG / Tm from each method.</td>
+            </tr>
+            <tr>
+              <td><strong>Shared-ΔH multi</strong></td>
+              <td><code>__multi__</code></td>
+              <td>Joint fit across all columns sharing ΔH and ΔS, with independent baselines per column. Each column carries its own concentration.</td>
+            </tr>
+            <tr>
+              <td><strong>Concentration series</strong></td>
+              <td><code>__concentration__</code></td>
+              <td>Extracts three Tm values per column (raw / vH / full fit) and runs <code>1/Tm = (R/ΔH)·ln(C_T/f) + ΔS/ΔH</code> for each. <code>f = 1</code> for homodimers, <code>f = 4</code> for heterodimers.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 id="charts">Chart interactions</h3>
+        <p>All three plots (melting curve, van't Hoff / concentration regression, derivative) are interactive:</p>
+        <table>
+          <thead><tr><th>Action</th><th>Gesture</th></tr></thead>
+          <tbody>
+            <tr><td>Zoom in / out</td><td>Mouse wheel scroll over the chart</td></tr>
+            <tr><td>Pan</td><td>Click and drag inside the chart area</td></tr>
+            <tr><td>Pinch zoom</td><td>Two-finger pinch on touch devices</td></tr>
+            <tr><td>Reset view</td><td>Click the <code>⤢ reset</code> button in the chart header</td></tr>
+          </tbody>
+        </table>
+        <p>Zooming and panning act on both axes simultaneously. The shaded analysis-window overlay on the melting-curve plot follows the zoom — useful for inspecting the baseline regions or the steep part of the transition without re-running the fit.</p>
+
+        <h3 id="download">Download results</h3>
+        <p>The <strong>Download CSV</strong> button saves a results file containing a per-column block (raw / vH / full-fit / multi columns) and, for concentration mode, an additional block with the per-curve table and the three regressions.</p>
+      </section>
+
+      <!-- ──────────────── CLI ──────────────── -->
+      <section id="cli">
+        <h2>2. Command-line interface</h2>
+        <p>The same pipeline runs outside the browser for batch / scripted use. The full result dict is printed as JSON on stdout. Pass <code>--csv-out</code> to also write a results CSV in the same format the browser produces.</p>
+
+        <h3 id="cli-run">Running</h3>
+        <p>From the project root, with <code>pandas</code>, <code>numpy</code>, and <code>scipy</code> available:</p>
+<pre><code>python -m analysis FILE.csv [options]</code></pre>
+        <p><code>python -m analysis --help</code> lists every flag. Exit codes: <code>0</code> on success, <code>1</code> if the analysis returns an error, <code>2</code> on bad input.</p>
+
+        <h3 id="cli-examples">Examples</h3>
+        <p>Default — van't Hoff + full fit on every signal column in the file:</p>
+<pre><code>python -m analysis melt.csv --csv-out batch.csv</code></pre>
+
+        <p>Single column:</p>
+<pre><code>python -m analysis melt.csv \
+  --column sample_1 --struct-type heterodimer \
+  --oligo 5.0 --T-low 20 --T-high 90 \
+  --csv-out single.csv</code></pre>
+
+        <p>Shared-ΔH fit across columns (defaults to all columns at <code>--oligo</code> when <code>--oligo-multi</code> is omitted):</p>
+<pre><code>python -m analysis melt.csv \
+  --column __multi__ --struct-type heterodimer \
+  --oligo-multi sample_1=0.5 \
+  --oligo-multi sample_2=5.0 \
+  --oligo-multi sample_3=50</code></pre>
+
+        <p>Concentration-series van't Hoff (requires <code>--oligo-multi</code> &mdash; varying C<sub>T</sub> is the whole point):</p>
+<pre><code>python -m analysis melt.csv \
+  --column __concentration__ --struct-type heterodimer \
+  --oligo-multi sample_1=0.5 \
+  --oligo-multi sample_2=5.0 \
+  --oligo-multi sample_3=50 \
+  --csv-out conc.csv</code></pre>
+
+        <h3 id="cli-flags">Flags</h3>
+        <table>
+          <thead><tr><th>Flag</th><th>Default</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>csv</code> <span class="text-muted">(positional)</span></td><td>—</td><td>CSV path</td></tr>
+            <tr><td><code>--column</code></td><td>(omit &rarr; all columns)</td><td>Run single-mode (vH + full fit) on every signal column when omitted. Pass a column name for one column, <code>__multi__</code> for shared-ΔH joint fit, or <code>__concentration__</code> for the 1/Tm vs ln(C<sub>T</sub>/f) series.</td></tr>
+            <tr><td><code>--struct-type</code></td><td><code>heterodimer</code></td><td><code>heterodimer</code> · <code>homodimer</code> · <code>monomer</code></td></tr>
+            <tr><td><code>--signal-type</code></td><td><code>absorbance</code></td><td><code>absorbance</code> · <code>fluorescence</code></td></tr>
+            <tr><td><code>--T-low</code> / <code>--T-high</code></td><td>data range</td><td>Transition window (°C)</td></tr>
+            <tr><td><code>--bl-lower</code> / <code>--bl-upper</code></td><td><code>10</code></td><td>Baseline offsets (°C)</td></tr>
+            <tr><td><code>--salt</code></td><td><code>150</code></td><td>NaCl in mM</td></tr>
+            <tr><td><code>--oligo</code></td><td><code>0.5</code></td><td>Single-column strand concentration (µM)</td></tr>
+            <tr><td><code>--oligo-multi NAME=VAL</code></td><td>—</td><td>Repeatable per-column µM for multi / concentration modes</td></tr>
+            <tr><td><code>--csv-out</code></td><td>—</td><td>Write a results CSV</td></tr>
+            <tr><td><code>--indent</code></td><td><code>2</code></td><td>JSON indent (<code>0</code> = compact)</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ──────────────── PYTHON API ──────────────── -->
+      <section id="api">
+        <h2>3. Python API</h2>
+        <p>For notebooks or larger pipelines, three mode-specific functions wrap the same orchestrator the CLI uses. Each takes a cleaned <code>pandas.DataFrame</code> and returns a plain dict.</p>
+
+        <h3 id="api-functions">Functions</h3>
+<pre><code>import pandas as pd
+from analysis import (
+    analyze_single, analyze_multi, analyze_concentration, analyze_csv,
+)
+from analysis.cleaning import clean
+
+df = clean(pd.read_csv("melt.csv"))</code></pre>
+
+        <p><strong>Single column</strong></p>
+<pre><code>r = analyze_single(
+    df, "sample_1",
+    struct_type="heterodimer", oligo=0.5,
+    T_low=20, T_high=90,
+)
+print(r["TmRaw"], r["fit_result"]["dH"])</code></pre>
+
+        <p><strong>Shared-ΔH multi fit</strong></p>
+<pre><code>r = analyze_multi(
+    df,
+    {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
+    struct_type="heterodimer",
+)</code></pre>
+
+        <p><strong>Concentration-series van't Hoff</strong> — returns three regressions (raw / vH / full fit):</p>
+<pre><code>r = analyze_concentration(
+    df,
+    {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
+    struct_type="heterodimer",
+)
+for key in ("raw", "vh", "fit"):
+    s = r["series"][key]
+    print(key, s["dH"], s["r_squared"])</code></pre>
+
+        <p><strong>One-liner from a CSV path</strong> — wraps <code>read_csv</code> + <code>clean</code> + dispatch:</p>
+<pre><code>analyze_csv("melt.csv", mode="single", column="sample_1", oligo=0.5)
+analyze_csv("melt.csv", mode="concentration",
+            oligo_multi={"sample_1": 0.5, "sample_2": 5.0})</code></pre>
+
+        <h3 id="api-result">Result dict shape</h3>
+        <p><strong>Single column</strong>:</p>
+<pre><code>{
+  "name": "sample_1",
+  "TmRaw": 52.5,
+  "vantHoff":   {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_vH": ...},
+  "fit_result": {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_fit": ...,
+                 "fit": [...], "derivative": [...]},
+  "T_used": [...], "signal": [...],
+  ...
+}</code></pre>
+
+        <p><strong>Concentration mode</strong>:</p>
+<pre><code>{
+  "is_concentration":   True,
+  "self_complementary": False,
+  "per_curve": [
+    {"name": ..., "TmRaw": ..., "TmvH": ..., "Tmfit": ..., "lnCT": ..., ...},
+    ...
+  ],
+  "series": {
+    "raw": {"dH": ..., "dS": ..., "dG_37": ..., "r_squared": ...,
+            "slope": ..., "intercept": ..., ...},
+    "vh":  {...},
+    "fit": {...},
+  },
+  "skipped": [{"name": ..., "reason": ...}, ...],
+}</code></pre>
+        <p>ΔH is in kcal/mol, ΔS in kcal/(mol·K), Tm in °C (Kelvin variants suffixed <code>_K</code>).</p>
+      </section>
+
+      <!-- ──────────────── MODEL ──────────────── -->
+      <section id="model">
+        <h2>Two-state model</h2>
+        <p>The observed signal is a linear combination of folded and unfolded baselines, weighted by the fraction unfolded θ(T):</p>
+        <div class="formula">
+          A(T) = (m<sub>F</sub>·T + b<sub>F</sub>)·(1 − θ) + (m<sub>U</sub>·T + b<sub>U</sub>)·θ<br>
+          K(T) = exp(−ΔG / RT),    ΔG = ΔH − T·ΔS<br>
+          θ    = K / (1 + K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(monomer)</span><br>
+          θ    = (√(1 + 8·c<sub>0</sub>·K) − 1) / (4·c<sub>0</sub>·K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(dimer)</span>
+        </div>
+        <p>Units throughout: ΔH in kcal/mol, ΔS in kcal/(mol·K), T in K (<code>T_K = T_C − T0</code>, with <code>T0 = −273.15</code>).</p>
+      </section>
+
+      <footer class="mt-12 pt-6 border-t border-border text-xs text-muted">
+        RNAmelt — analysis runs locally in your browser via Pyodide / WebAssembly. No data is uploaded.
+      </footer>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -30,7 +30,7 @@ import numpy as np
 #from scipy.signal import savgol_filter
 from analysis.utils import safe_json
 #from analysis.util import analyze
-from analysis import methods, functions
+from analysis import methods, functions, constants
 
 # ─── Main entry point ────────────────────────────────────────────────────────
 
@@ -56,6 +56,8 @@ def run(df, params: dict):# -> dict:
     col = params.get("column", sig_cols[0])
     if col in ('multi', '__multi__'):
         return _run_multi(df, params, T_all, sig_cols)
+    elif col in ('concentration', '__concentration__'):
+        return _run_concentration(df, params, T_all, sig_cols)
     else:
         if col not in df.columns:
             col = sig_cols[0]
@@ -90,8 +92,8 @@ def run(df, params: dict):# -> dict:
 
         #signal_type = params.get("signal_type", "absorbance")
         struct_type = params.get("struct_type", "heterodimer")
-        base_b_offset = params.get("bl_lower_offset")
-        base_ub_offset = params.get("bl_upper_offset")
+        base_b_offset = params.get("bl_lower_offset", 10)
+        base_ub_offset = params.get("bl_upper_offset", 10)
 
 
         #if signal_type == "absorbance":
@@ -109,46 +111,45 @@ def run(df, params: dict):# -> dict:
             baseline_unbound_minT=r_base_ub_minT,
             #debug=True
         )
-        print(T_m_raw, base_b_r, base_ub_r, base_med_r)
+        #print(T_m_raw, base_b_r, base_ub_r, base_med_r)
 
-        #try:
-        print(len(TT), len(used_data), len(T_all), len(signal_all))
-        print('c0', c0)
-        print('struct_type', struct_type)
+        try:
+            #print(len(TT), len(used_data), len(T_all), len(signal_all))
+            #print('c0', c0)
+            #print('struct_type', struct_type)
 
-        T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
-            TT,
-            used_data,
-            *base_b_r,
-            *base_ub_r,
-            c0,
-            border = 0.15,
-            #t1_min = t1_min,
-            #t1_max = t1_max
-            structType = struct_type,
-        )
+            T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
+                TT,
+                used_data,
+                *base_b_r,
+                *base_ub_r,
+                c0,
+                border = 0.15,
+                #t1_min = t1_min,
+                #t1_max = t1_max
+                structType = struct_type,
+            )
 
-        print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
+            #print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
 
-        vantHoff = {
-            "success": True,
-            "dG":      dG_37_vH,
-            "dH":      dH_vH,
-            "dS":      dS_vH,
-            "T_m_vH":  T_m_vH,
-            "t1":      t1,
-            "K":       K,
-            "xdata":   xdata,
-            "ydata":   ydata,
-            "fit_vh":  fit_vh,
-        }
+            vantHoff = {
+                "success": True,
+                "dG":      dG_37_vH,
+                "dH":      dH_vH,
+                "dS":      dS_vH,
+                "T_m_vH":  T_m_vH,
+                "t1":      t1,
+                "K":       K,
+                "xdata":   xdata,
+                "ydata":   ydata,
+                "fit_vh":  fit_vh,
+            }
 
-        #except Exception as e:
-        #    vantHoff = {
-        #        "success": False,
-        #        "error":   str(e),
-        #    }
-        #    print('vantHoff', vantHoff)
+        except Exception as e:
+            vantHoff = {
+                "success": False,
+                "error":   str(e),
+            }
 
 
         if vantHoff['success']:
@@ -165,48 +166,48 @@ def run(df, params: dict):# -> dict:
             dH_init = -80
             dS_init = -0.2
 
-        #try:
-        #print(len(TT), TT[0], TT[-1])
-        #print(len(used_data), min(used_data), max(used_data))
-        #print('c0', c0)
-        #print('dH_init', dH_init)
-        #print('dS_init', dS_init)
+        try:
+            #print(len(TT), TT[0], TT[-1])
+            #print(len(used_data), min(used_data), max(used_data))
+            #print('c0', c0)
+            #print('dH_init', dH_init)
+            #print('dS_init', dS_init)
 
-        dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
-            TT,
-            used_data,
-            c0=c0,
-            dH_init = dH_init,
-            dS_init = dS_init,
-        )
+            dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
+                TT,
+                used_data,
+                c0=c0,
+                dH_init = dH_init,
+                dS_init = dS_init,
+            )
 
-        #print(dG_37_f, dH_f, dS_f, T_m_f)
+            #print(dG_37_f, dH_f, dS_f, T_m_f)
 
-        fit = np.array([ functions.full_function(
-            tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
-        ) for tt in TT ])
+            fit = np.array([ functions.full_function(
+                tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
+            ) for tt in TT ])
 
-        # NOTE: May need to check that, not general enough?
-        derivative = np.gradient(used_data, 0.5)/-1.
+            # NOTE: May need to check that, not general enough?
+            derivative = np.gradient(used_data, 0.5)/-1.
 
-        fit_result = {
-            "success":    True,
-            "dG":         dG_37_f,
-            "dH":         dH_f,
-            "dS":         dS_f,
-            "T_m_fit":    T_m_f,
-            "base_b_f":   base_b_f,
-            "base_ub_f":  base_ub_f,
-            "base_med_f": base_med_f,
-            "fit":        fit,
-            "derivative": derivative,
-        }
+            fit_result = {
+                "success":    True,
+                "dG":         dG_37_f,
+                "dH":         dH_f,
+                "dS":         dS_f,
+                "T_m_fit":    T_m_f,
+                "base_b_f":   base_b_f,
+                "base_ub_f":  base_ub_f,
+                "base_med_f": base_med_f,
+                "fit":        fit,
+                "derivative": derivative,
+            }
 
-        #except Exception as e:
-        #    fit_result = {
-        #        "success":    False,
-        #        "error":      str(e),
-        #    }
+        except Exception as e:
+            fit_result = {
+                "success":    False,
+                "error":      str(e),
+            }
 
 
         thermo_properties = {
@@ -293,4 +294,190 @@ def _run_multi(df, params: dict, T_all, sig_cols):
         "dH":         dH,
         "dS":         dS,
         "columns":    columns,
+    })
+
+
+def _run_concentration(df, params: dict, T_all, sig_cols):
+    """Concentration-series van't Hoff: extract Tm per column, regress 1/Tm vs ln(C_T/f)."""
+    struct_type = params.get("struct_type", "heterodimer")
+    if struct_type == "monomer":
+        return {
+            "name": "Concentration Series",
+            "error": "Concentration-series van't Hoff is not applicable to monomers — Tm is concentration-independent for intramolecular folding.",
+        }
+    self_comp = (struct_type == "homodimer")
+
+    oligo_multi = params.get("oligo_multi") or {}
+    salt_c      = float(params.get("salt", 150))
+
+    T_min, T_max = float(T_all.min()), float(T_all.max())
+    T_low  = float(params.get("T_low",  T_min))
+    T_high = float(params.get("T_high", T_max))
+
+    pos_start = int(np.where(T_all == T_low)[0][0])
+    pos_end   = int(np.where(T_all == T_high)[0][0]) + 1
+    TT        = T_all[pos_start:pos_end]
+
+    base_b_offset  = float(params.get("bl_lower_offset", 10))
+    base_ub_offset = float(params.get("bl_upper_offset", 10))
+    r_base_b_maxT  = T_low  + base_b_offset
+    r_base_ub_minT = T_high - base_ub_offset
+
+    per_curve = []
+    skipped   = []
+    f_factor  = 1.0 if self_comp else 4.0
+
+    for col in sig_cols:
+        sig = df[col].values.astype(float)
+        if np.isnan(sig).any():
+            skipped.append({"name": col, "reason": "contains NaN"})
+            continue
+        if col not in oligo_multi:
+            skipped.append({"name": col, "reason": "no concentration provided"})
+            continue
+        try:
+            oligo_uM = float(oligo_multi[col])
+        except (TypeError, ValueError):
+            skipped.append({"name": col, "reason": "non-numeric concentration"})
+            continue
+        if not np.isfinite(oligo_uM) or oligo_uM <= 0:
+            skipped.append({"name": col, "reason": f"non-positive concentration {oligo_uM}"})
+            continue
+
+        used_data = sig[pos_start:pos_end]
+        c_M = 1e-6 * oligo_uM * 2  # match c0 convention used elsewhere in this file
+
+        # ── raw Tm via baseline intersection (mandatory) ──────────────────
+        try:
+            T_m_raw_C, _, base_b, base_ub, _ = methods.T_m_ds_raw(
+                TT, used_data,
+                baseline_bound_maxT=r_base_b_maxT,
+                baseline_unbound_minT=r_base_ub_minT,
+            )
+        except Exception as e:
+            skipped.append({"name": col, "reason": f"raw Tm extraction failed: {e}"})
+            continue
+        if T_m_raw_C is None or not np.isfinite(T_m_raw_C) or not (T_low <= T_m_raw_C <= T_high):
+            skipped.append({"name": col, "reason": f"raw Tm out of window ({T_m_raw_C})"})
+            continue
+
+        # ── van't Hoff Tm (best effort) ───────────────────────────────────
+        T_m_vH_C  = None
+        dH_vh_seed = None
+        dS_vh_seed = None
+        try:
+            T_m_vH_C, _, dH_vh_seed, dS_vh_seed, *_ = methods.vantHoff(
+                TT, used_data, *base_b, *base_ub, c_M,
+                border=0.15, structType=struct_type,
+            )
+        except Exception:
+            T_m_vH_C = None
+
+        # ── full curve fit Tm (best effort) ───────────────────────────────
+        dH_init = dH_vh_seed if (dH_vh_seed is not None and -150 < dH_vh_seed < 0) else -80.0
+        dS_init = dS_vh_seed if (dS_vh_seed is not None and -5 < dS_vh_seed < 0) else -0.2
+        T_m_fit_C = None
+        try:
+            _, _, _, T_m_fit_C, *_ = methods.fit_full_function(
+                TT, used_data, c0=c_M, dH_init=dH_init, dS_init=dS_init,
+            )
+        except Exception:
+            T_m_fit_C = None
+
+        def _to_K(T_C):
+            if T_C is None or not np.isfinite(T_C):
+                return None
+            return float(T_C - constants.T0)
+
+        per_curve.append({
+            "name":        col,
+            "oligoC":      oligo_uM,
+            "c0":          c_M,
+            "TmRaw":       float(T_m_raw_C),
+            "TmRaw_K":     float(T_m_raw_C - constants.T0),
+            "TmKelvin":    float(T_m_raw_C - constants.T0),  # back-compat alias
+            "TmvH":        None if T_m_vH_C is None or not np.isfinite(T_m_vH_C) else float(T_m_vH_C),
+            "TmvH_K":      _to_K(T_m_vH_C),
+            "Tmfit":       None if T_m_fit_C is None or not np.isfinite(T_m_fit_C) else float(T_m_fit_C),
+            "Tmfit_K":     _to_K(T_m_fit_C),
+            "lnCT":        float(np.log(c_M / f_factor)),
+            "T_used":      TT,
+            "signal":      used_data,
+            "signal_all":  sig,
+            "base_b_r":    base_b,
+            "base_ub_r":   base_ub,
+        })
+
+    if len(per_curve) < 2:
+        return safe_json({
+            "name": "Concentration Series",
+            "error": f"Need at least 2 valid (Tm, C_T) points; got {len(per_curve)}.",
+            "per_curve": per_curve,
+            "skipped":   skipped,
+        })
+
+    def _series_for(key):
+        tm_K = []
+        ct_M = []
+        for p in per_curve:
+            v = p[key]
+            if v is not None and np.isfinite(v) and v > 0:
+                tm_K.append(v)
+                ct_M.append(p["c0"])
+        if len(tm_K) < 2:
+            return None
+        try:
+            vh = methods.vant_hoff_concentration(
+                np.array(tm_K), np.array(ct_M),
+                self_complementary=self_comp,
+            )
+        except ValueError:
+            return None
+        ln_ct_min = float(vh["ln_ct"].min())
+        ln_ct_max = float(vh["ln_ct"].max())
+        ln_ct_line  = np.linspace(ln_ct_min, ln_ct_max, 50)
+        inv_tm_line = vh["slope"] * ln_ct_line + vh["intercept"]
+        return {
+            "success":     True,
+            "n":           len(tm_K),
+            "dH":          vh["dH"],
+            "dS":          vh["dS"],
+            "dG_37":       vh["dG_37"],
+            "r_squared":   vh["r_squared"],
+            "slope":       vh["slope"],
+            "intercept":   vh["intercept"],
+            "ln_ct":       vh["ln_ct"],
+            "inv_tm":      vh["inv_tm"],
+            "ln_ct_line":  ln_ct_line,
+            "inv_tm_line": inv_tm_line,
+        }
+
+    series = {
+        "raw": _series_for("TmRaw_K"),
+        "vh":  _series_for("TmvH_K"),
+        "fit": _series_for("Tmfit_K"),
+    }
+
+    if series["raw"] is None:
+        return safe_json({
+            "name": "Concentration Series",
+            "error": "Could not regress raw-Tm series — too few valid points.",
+            "per_curve": per_curve,
+            "skipped":   skipped,
+            "series":    series,
+        })
+
+    return safe_json({
+        "name":               "concentration",
+        "is_concentration":   True,
+        "struct_type":        struct_type,
+        "self_complementary": self_comp,
+        "saltC":              salt_c,
+        "T_all":              T_all,
+        "T_used":             TT,
+        "per_curve":          per_curve,
+        "skipped":            skipped,
+        "series":             series,
+        # back-compat: top-level vantHoff = raw series
+        "vantHoff":           series["raw"],
     })

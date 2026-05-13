@@ -1,75 +1,165 @@
-# RNA Melt — In-Browser Van't Hoff Analysis
+# RNAmelt — RNA / DNA Melting-Curve Analysis
 
-Fully serverless. Python (scipy curve fitting) runs via WebAssembly in the browser.
-Data never leaves the user's machine.
+Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of UV-absorbance or
+fluorescence melting curves. The same Python pipeline runs in two places:
+
+- **Browser** — `index.html` loads Python via Pyodide (WebAssembly). Data
+  never leaves the user's machine; no server, no install.
+- **CLI** — `python -m analysis FILE.csv [...]` for batch / scripted use.
+- **Python API** — `from analysis import analyze_single, analyze_multi,
+  analyze_concentration, analyze_csv` for use in notebooks or larger
+  pipelines.
 
 ## Project structure
 
 ```
-rna/
-├── index.html                    # UI, controls, charts
-└── analysis/
-    ├── __init__.py               # Module registry
-    ├── utils.py                  # R constant, unit conversions, safe_json
-    ├── cleaning.py               # CSV parsing, column renaming, sort by T
-    └── analysis_melting.py       # Two-state fit + van't Hoff
+RNAmelt/
+├── index.html              # Single-page UI: controls, charts (Chart.js), Pyodide bridge
+├── analysis/
+│   ├── __init__.py         # Public API re-exports
+│   ├── __main__.py         # CLI entry point
+│   ├── api.py              # Python API: analyze_single / _multi / _concentration / _csv
+│   ├── constants.py        # R, T0
+│   ├── cleaning.py         # CSV parsing, column normalisation
+│   ├── functions.py        # Pure helpers (sigmoidal model, fraction unfolded, …)
+│   ├── methods.py          # Tm extraction, van't Hoff, full curve fit, multi fit, conc. series
+│   ├── analysis_melting.py # Pipeline orchestrator — single entry point `run(df, params)`
+│   └── utils.py            # safe_json, unit helpers
+└── tests/
+    ├── test_methods.py     # vant_hoff_concentration unit tests
+    └── test_analysis.py    # End-to-end concentration-series tests
 ```
 
-## CSV format expected
+Module layering is strict: `functions` → `methods` → `analysis_melting` →
+`__main__` / browser. `functions` stays stateless.
+
+## CSV format
 
 ```
 temperature, sample_1, sample_2, ...
 20.0,        0.412,    0.388, ...
 20.5,        0.415,    0.391, ...
-...
 ```
 
-- Column 0 : Temperature in °C (any header name)
-- Columns 1+: Absorbance or fluorescence signal (any header name)
+- Column 0: temperature in °C (any header name).
+- Columns 1+: absorbance or fluorescence signal (any header name).
+- Rows that are entirely NaN, or where temperature is missing, are dropped.
 
-## Running locally
+## Running the browser app
 
-Must be served via HTTP (not opened as file://).
+Must be served over HTTP — `file://` won't load Pyodide.
 
 ```bash
-cd rna
 python -m http.server 8000
 # open http://localhost:8000
 ```
 
-## Interactive parameters
+## CLI
 
-All adjustable in the sidebar without reloading:
+Same orchestrator, no browser needed. Result is JSON on stdout; pass
+`--csv-out` to also write a results CSV in the format the browser
+download produces.
 
-| Parameter       | Description                                                  |
-|-----------------|--------------------------------------------------------------|
-| Signal column   | Choose which data column to fit (if multiple)                |
-| T_low / T_high  | Transition window boundaries — only this region is fitted    |
-| mL, bL          | Lower baseline slope & intercept: A_lower(T) = mL·T + bL    |
-| mU, bU          | Upper baseline slope & intercept: A_upper(T) = mU·T + bU    |
-| Fix baselines   | Hold mL/bL/mU/bU fixed; fit only ΔH and Tm                  |
-| CT (µM)         | Strand concentration — adds a point to 1/Tm vs ln[CT] plot  |
+```bash
+# default: van't Hoff + full fit on every signal column in the CSV
+python -m analysis melt.csv --csv-out batch.csv
 
-Press **↺ Auto** to clear all overrides and re-detect baselines automatically.
+# single column
+python -m analysis melt.csv --column sample_1 --struct-type heterodimer \
+    --oligo 5.0 --T-low 20 --T-high 90 --csv-out single.csv
+
+# shared-ΔH fit across all signal columns (defaults to all columns at --oligo
+# if no --oligo-multi is given)
+python -m analysis melt.csv --column __multi__ --struct-type heterodimer \
+    --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50
+
+# concentration-series van't Hoff (1/Tm vs ln(C_T/f)) — requires --oligo-multi
+python -m analysis melt.csv --column __concentration__ --struct-type heterodimer \
+    --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50 \
+    --csv-out conc.csv
+```
+
+`python -m analysis --help` lists every flag. Exit code is 0 on success,
+1 if the analysis returns an error, 2 on bad input.
+
+## Python API
+
+For notebook / pipeline use, three mode-specific functions wrap the same
+orchestrator the CLI uses. They take a cleaned `pandas.DataFrame` and
+return a plain dict.
+
+```python
+import pandas as pd
+from analysis import (
+    analyze_single, analyze_multi, analyze_concentration, analyze_csv,
+)
+from analysis.cleaning import clean
+
+df = clean(pd.read_csv("melt.csv"))
+
+# single column
+r = analyze_single(df, "sample_1", struct_type="heterodimer", oligo=0.5,
+                   T_low=20, T_high=90)
+print(r["TmRaw"], r["fit_result"]["dH"])
+
+# shared-ΔH multi fit
+r = analyze_multi(df, {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
+                  struct_type="heterodimer")
+
+# concentration-series van't Hoff (returns three regressions: raw / vH / fit)
+r = analyze_concentration(df,
+                          {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
+                          struct_type="heterodimer")
+for key in ("raw", "vh", "fit"):
+    s = r["series"][key]
+    print(key, s["dH"], s["r_squared"])
+```
+
+`analyze_csv(path, mode=...)` is a one-liner that wraps `pd.read_csv` +
+`clean` + dispatch:
+
+```python
+analyze_csv("melt.csv", mode="single", column="sample_1", oligo=0.5)
+analyze_csv("melt.csv", mode="concentration",
+            oligo_multi={"sample_1": 0.5, "sample_2": 5.0})
+```
+
+## Analysis modes
+
+All three modes go through `analysis_melting.run(df, params)`; the
+`column` param selects the mode.
+
+| `column` value      | Mode                       | What it does |
+|---------------------|----------------------------|--------------|
+| any signal-column name | **Single column**       | Tm by baseline intersection, van't Hoff linearisation, full two-state nonlinear fit. Returns ΔH/ΔS/ΔG/Tm from each method. |
+| `__multi__`         | **Shared-ΔH multi fit**    | Joint fit of every column with a common ΔH, ΔS but independent baselines. Each column carries its own concentration. |
+| `__concentration__` | **Concentration-series van't Hoff** | Extracts three Tm values per column (raw / van't Hoff / full-fit) and runs `1/Tm = (R/ΔH)·ln(C_T/f) + ΔS/ΔH` linear regression for each. `f = 1` (homodimer) or `f = 4` (heterodimer). |
 
 ## Two-state model
 
-    A(T) = A_lower(T) · (1 − α) + A_upper(T) · α
-    α(T) = K(T) / (1 + K(T))
-    K(T) = exp(ΔH/R · (1/Tm − 1/T))
+Observed signal is a linear combination of folded and unfolded baselines,
+weighted by the fraction unfolded θ(T):
 
-Fitted parameters: ΔH, Tm (and optionally mL, bL, mU, bU if not fixed).
-Derived: ΔS = ΔH/Tm, ΔG°₂₅ = ΔH − 298.15·ΔS.
+```
+A(T) = (m_F·T + b_F)·(1 − θ) + (m_U·T + b_U)·θ
+K(T) = exp(−ΔG / RT),    ΔG = ΔH − T·ΔS
+θ    = K / (1 + K)                       (monomer)
+θ    = (√(1 + 8·c0·K) − 1) / (4·c0·K)    (dimer)
+```
 
-## Van't Hoff 1/Tm vs ln[CT]
+Units throughout: ΔH in kcal/mol, ΔS in kcal/(mol·K), T in K
+(`T_K = T_C − T0`, with `T0 = −273.15`).
 
-For bimolecular / concentration-dependent melting:
-Load multiple CSV files at different CT values, enter the CT for each run,
-and the accumulated points build up the 1/Tm vs ln[CT] plot.
-Once ≥ 3 points are collected, a linear regression gives ΔH and ΔS.
+## Tests
+
+```bash
+python -m unittest discover tests
+```
+
+Tests run outside the browser against the same `analysis/` package the
+browser loads.
 
 ## Deployment
 
-Drop the folder on any static host (GitHub Pages, Netlify, Cloudflare Pages).
-No build step, no server, no cost.
-# RNAmelt
+The browser app is a static folder — drop it on any HTTP host
+(GitHub Pages, Netlify, Cloudflare Pages, plain nginx). No build step.

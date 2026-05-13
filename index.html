@@ -8,6 +8,8 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -285,8 +287,18 @@ tailwind.config = {
 
 <!-- ════════════════════ MAIN ════════════════════ -->
 <main class="flex-1 p-8 overflow-x-hidden min-w-0">
-  <h1 class="text-xl font-semibold tracking-tight mb-1">RNA Melting Analysis</h1>
-  <p class="text-sm text-muted mb-6">Two-state model · Van't Hoff thermodynamics · Baseline correction</p>
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight mb-1">RNA Melting Analysis</h1>
+      <p class="text-sm text-muted">Two-state model · Van't Hoff thermodynamics · Baseline correction</p>
+    </div>
+    <a href="help.html" target="_blank" rel="noopener"
+       class="shrink-0 mt-1 inline-flex items-center gap-1.5 text-xs font-mono text-muted hover:text-accent transition"
+       title="Open the help page in a new tab">
+      <span class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-current text-[10px] font-semibold">?</span>
+      Help
+    </a>
+  </div>
 
   <!-- Banners -->
   <div id="runningBanner" class="hidden mb-4 items-center gap-3 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
@@ -323,17 +335,26 @@ tailwind.config = {
     <div class="grid grid-cols-2 gap-4 mb-5">
 
       <div class="col-span-2 bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Melting curve · raw + two-state fit + baselines</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div class="text-xs font-semibold uppercase tracking-wider text-muted">Melting curve · raw + two-state fit + baselines</div>
+          <button data-reset-chart="chartMelt" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartMelt" style="max-height:480px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div id="alphaTitle" class="text-xs font-semibold uppercase tracking-wider text-muted">Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T</div>
+          <button data-reset-chart="chartAlpha" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartAlpha" style="max-height:420px"></canvas>
       </div>
 
       <div class="bg-surface rounded-xl border border-border shadow-sm p-5">
-        <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted mb-3">dA/dT derivative · Tm estimate</div>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <div id="derivTitle" class="text-xs font-semibold uppercase tracking-wider text-muted">dA/dT derivative · Tm estimate</div>
+          <button data-reset-chart="chartDeriv" class="resetZoomBtn shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted hover:text-accent border border-border rounded px-2 py-0.5 transition" title="Scroll to zoom · drag to pan · click to reset">⤢ reset</button>
+        </div>
         <canvas id="chartDeriv" style="max-height:420px"></canvas>
       </div>
 
@@ -361,6 +382,10 @@ tailwind.config = {
             <th>ΔH fit (kcal/mol)</th>
             <th>ΔS fit (cal/mol·K)</th>
             <th>ΔG₃₇ fit (kcal/mol)</th>
+            <th>Tₘ multi (°C)</th>
+            <th>ΔH multi (kcal/mol)</th>
+            <th>ΔS multi (cal/mol·K)</th>
+            <th>ΔG₃₇ multi (kcal/mol)</th>
             <th></th>
           </tr></thead>
           <tbody id="colResultsBody"></tbody>
@@ -370,24 +395,55 @@ tailwind.config = {
 
     <!-- Van't Hoff multi-conc -->
     <div id="vhoffSection" class="hidden mb-5">
-      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Van't Hoff — accumulated concentrations</div>
-      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-hidden mb-3">
+      <div class="text-xs font-semibold uppercase tracking-widest text-muted mb-2">Van't Hoff — concentration series</div>
+      <div class="bg-surface rounded-xl border border-border shadow-sm overflow-x-auto mb-3">
         <table class="w-full vhoff-table">
-          <thead><tr><th>CT (µM)</th><th>Tm (°C)</th><th>1/Tm (K⁻¹)</th><th>ln[CT]</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Column</th>
+            <th>CT (µM)</th>
+            <th>ln(C<sub>T</sub>/f)</th>
+            <th>Tₘ raw (°C)</th>
+            <th>1/Tₘ raw (K⁻¹)</th>
+            <th>Tₘ vH (°C)</th>
+            <th>1/Tₘ vH (K⁻¹)</th>
+            <th>Tₘ fit (°C)</th>
+            <th>1/Tₘ fit (K⁻¹)</th>
+          </tr></thead>
           <tbody id="vhoffTableBody"></tbody>
         </table>
       </div>
       <div id="vhoffReg" class="hidden bg-surface rounded-xl border border-border shadow-sm p-4">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Linear regression: 1/Tm = (R/ΔH)·ln[CT] + ΔS/ΔH</div>
-        <div id="vhoffRegValues" class="flex gap-6 flex-wrap font-mono text-sm"></div>
+        <div id="vhoffRegHeader" class="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Linear regression: 1/T<sub>m</sub> = (R/ΔH)·ln(C<sub>T</sub>/f) + ΔS/ΔH</div>
+        <div class="overflow-x-auto">
+          <table class="w-full vhoff-table">
+            <thead><tr>
+              <th>Method</th>
+              <th>n</th>
+              <th>slope (K⁻¹)</th>
+              <th>intercept (K⁻¹)</th>
+              <th>ΔH° (kcal/mol)</th>
+              <th>ΔS° (cal/mol·K)</th>
+              <th>ΔG°₃₇ (kcal/mol)</th>
+              <th>R²</th>
+            </tr></thead>
+            <tbody id="vhoffRegValues"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- Export -->
-    <button id="downloadBtn"
-      class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90">
-      ⬇ Download results CSV
-    </button>
+    <div class="flex flex-wrap gap-2">
+      <button id="downloadBtn"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90">
+        ⬇ Download results CSV
+      </button>
+      <button id="downloadPlotsBtn"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90"
+        title="Download each visible chart as a PNG (capturing current zoom / pan state)">
+        ⬇ Download plots (PNG)
+      </button>
+    </div>
 
   </div>
 </main>
@@ -403,11 +459,18 @@ const PYTHON_MODULES = [
   { path: 'analysis/utils.py' },
   { path: 'analysis/cleaning.py' },
   { path: 'analysis/analysis_melting.py' },
+  { path: 'analysis/api.py' },
 ];
 
-let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[];
+let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
 const colResults={};
 const charts={};
+
+// Per-column sidebar parameter memory: first visit → defaults, return visit → previous values.
+const colParams = {};
+let   activeCol = null;
+let   dataTRange = {min: null, max: null};
+const PERSISTED_PARAM_IDS = ['T_low','T_high','bl_lower_offset','bl_upper_offset','CT'];
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -469,11 +532,18 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
       `${info.rows} rows · T: ${info.T_min.toFixed(1)}–${info.T_max.toFixed(1)} °C · ${info.sig_cols.length} signal column(s)`;
     const sel = document.getElementById('colSelect');
     const cols = info.sig_cols;
-    const multiOpt = cols.length > 1 ? `<option value="__multi__">multi (all columns)</option>` : '';
-    sel.innerHTML = cols.map(c=>`<option value="${c}">${c}</option>`).join('') + multiOpt;
+    const extraOpts = cols.length > 1
+      ? `<option value="__multi__">multi (shared ΔH fit)</option>`
+      + `<option value="__concentration__">concentration series (1/Tm vs ln C_T)</option>`
+      : '';
+    sel.innerHTML = cols.map(c=>`<option value="${c}">${c}</option>`).join('') + extraOpts;
     document.getElementById('colSection').style.display = cols.length > 1 ? '' : 'none';
     buildMultiCTInputs(cols);
     updateCTBlocks();
+    // Reset per-column param memory for the new file.
+    Object.keys(colParams).forEach(k => delete colParams[k]);
+    dataTRange = {min: info.T_min, max: info.T_max};
+    activeCol  = sel.value;
     setIfEmpty('T_low',  (info.T_min).toFixed(1));
     setIfEmpty('T_high', (info.T_max).toFixed(1));
     initTRangeSlider(info.T_min, info.T_max);
@@ -488,9 +558,45 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
 // ── Run ───────────────────────────────────────────────────────────────────────
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
 document.getElementById('colSelect').addEventListener('change', () => {
+  const newCol = document.getElementById('colSelect').value;
+  // Save the column we're leaving, then restore (or seed defaults for) the new one.
+  snapshotColParams(activeCol);
+  applyColParams(colParams[newCol] || defaultColParams());
+  if (!colParams[newCol]) snapshotColParams(newCol);
+  activeCol = newCol;
   updateCTBlocks();
   runAnalysis();
 });
+
+function snapshotColParams(col) {
+  if (!col) return;
+  const snap = {};
+  PERSISTED_PARAM_IDS.forEach(id => {
+    snap[id] = document.getElementById(id).value;
+  });
+  colParams[col] = snap;
+}
+
+function defaultColParams() {
+  const fmt = v => (v == null ? '' : (+v).toFixed(1));
+  return {
+    T_low:           fmt(dataTRange.min),
+    T_high:          fmt(dataTRange.max),
+    bl_lower_offset: '10',
+    bl_upper_offset: '10',
+    CT:              '0.5',
+  };
+}
+
+function applyColParams(p) {
+  PERSISTED_PARAM_IDS.forEach(id => {
+    document.getElementById(id).value = p[id] ?? '';
+  });
+  // Sync the dual-range slider after T_low / T_high change.
+  ['T_low','T_high'].forEach(id => {
+    document.getElementById(id).dispatchEvent(new Event('change'));
+  });
+}
 
 function buildMultiCTInputs(cols) {
   const grid = document.getElementById('multiCTGrid');
@@ -503,9 +609,10 @@ function buildMultiCTInputs(cols) {
 }
 
 function updateCTBlocks() {
-  const isMulti = document.getElementById('colSelect').value === '__multi__';
-  document.getElementById('singleCTBlock').style.display = isMulti ? 'none' : '';
-  document.getElementById('multiCTBlock').style.display  = isMulti ? ''     : 'none';
+  const v = document.getElementById('colSelect').value;
+  const isPerCol = (v === '__multi__' || v === '__concentration__');
+  document.getElementById('singleCTBlock').style.display = isPerCol ? 'none' : '';
+  document.getElementById('multiCTBlock').style.display  = isPerCol ? ''     : 'none';
 }
 
 async function runAnalysis() {
@@ -543,18 +650,22 @@ json.dumps(_am.run(_df_global, _params))
 }
 
 document.getElementById('autoBtn').addEventListener('click', () => {
-  ['T_low','T_high'].forEach(id => document.getElementById(id).value='');
-  document.getElementById('CT').value='0.5';
+  applyColParams(defaultColParams());
   document.getElementById('saltConc').value='150';
-  document.getElementById('bl_lower_offset').value='10';
-  document.getElementById('bl_upper_offset').value='10';
+  snapshotColParams(activeCol);
   //document.getElementById('fixBaselines').checked=false;
   runAnalysis();
 });
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderResults(r) {
-  if (r.is_multi) return renderMultiResults(r);
+  if (!r.is_concentration) {
+    hideInfo();
+    document.getElementById('alphaTitle').innerHTML =
+      `Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T`;
+  }
+  if (r.is_multi)         return renderMultiResults(r);
+  if (r.is_concentration) return renderConcentrationResults(r);
   const vh  = r.vantHoff;
   const fit = r.fit_result;
   const c0  = r.c0;
@@ -618,10 +729,10 @@ function renderResults(r) {
     const yMin = Math.min(...validY, lnKaTm) - 0.5;
     const yMax = Math.max(...validY, lnKaTm) + 0.5;
 
-    console.log({
-      tm_x, xMin, xMax, lnKaTm, yMin, yMax,
-      vh_T_m_vH: vh.T_m_vH, c0
-    });
+    // console.log({
+    //   tm_x, xMin, xMax, lnKaTm, yMin, yMax,
+    //   vh_T_m_vH: vh.T_m_vH, c0
+    // });
 
     rebuildChart('chartAlpha', {
       type:'scatter', data:{datasets:[
@@ -638,16 +749,24 @@ function renderResults(r) {
         },
       })
     });
+  } else if (charts.chartAlpha) {
+    charts.chartAlpha.destroy();
+    delete charts.chartAlpha;
   }
 
   // ── Derivative ────────────────────────────────────────────────────────
   document.getElementById('derivTitle').textContent = 'dF/dT derivative · Tm estimate';
-  rebuildChart('chartDeriv', {
-    type:'scatter', data:{datasets:[
-      {label:'dF/dT', data:zip(r.T_used, fit?.derivative||[]), borderColor:'#c0392b', borderWidth:3, pointRadius:0, showLine:true, tension:.3},
-    ]},
-    options:scatterOpts('Temperature (°C)', 'dF/dT')
-  });
+  if (fit?.success && Array.isArray(fit.derivative) && fit.derivative.length) {
+    rebuildChart('chartDeriv', {
+      type:'scatter', data:{datasets:[
+        {label:'dF/dT', data:zip(r.T_used, fit.derivative), borderColor:'#c0392b', borderWidth:3, pointRadius:0, showLine:true, tension:.3},
+      ]},
+      options:scatterOpts('Temperature (°C)', 'dF/dT')
+    });
+  } else if (charts.chartDeriv) {
+    charts.chartDeriv.destroy();
+    delete charts.chartDeriv;
+  }
 
   // ── Result cards ──────────────────────────────────────────────────────
   let html = '';
@@ -657,14 +776,16 @@ function renderResults(r) {
     html += card('ΔH° (vH)', vh.dH.toFixed(2), null, 'kcal/mol');
     html += card('ΔS° (vH)', (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
     html += card('ΔG°₃₇ (vH)', vh.dG.toFixed(2), null, 'kcal/mol');
+  } else if (vh && vh.success === false) {
+    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Van't Hoff analysis failed: ${vh.error || 'unknown error'}</div>`;
   }
   if (fit?.success) {
     html += card('Tₘ (fit)', fit.T_m_fit.toFixed(2), null, '°C');
     html += card('ΔH° (fit)', fit.dH.toFixed(2), null, 'kcal/mol');
     html += card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
     html += card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), null, 'kcal/mol');
-  } else if (fit?.error) {
-    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error}</div>`;
+  } else if (fit && fit.success === false) {
+    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error || 'unknown error'}</div>`;
   }
   if (r.TmRaw != null) html += card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C');
   document.getElementById('resultsGrid').innerHTML = html;
@@ -727,19 +848,166 @@ function renderMultiResults(r) {
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
   r.columns.forEach(c => {
+    const prev = colResults[c.name] || {};
     colResults[c.name] = {
-      TmRaw: null,
-      vh:    null,
-      fit:   {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
+      TmRaw: prev.TmRaw ?? null,
+      vh:    prev.vh    ?? null,
+      fit:   prev.fit   ?? null,
+      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
     };
   });
   renderColResults();
 }
 
+function renderConcentrationResults(r) {
+  lastConcResult = r;
+  const series = r.series || {raw: r.vantHoff, vh: null, fit: null};
+  const vh = series.raw;
+  const f  = r.self_complementary ? 1 : 4;
+  const methodMeta = {
+    raw: {label: 'Tₘ raw', color: '#1a6b4a'},
+    vh:  {label: 'Tₘ vH',  color: '#0072B2'},
+    fit: {label: 'Tₘ fit', color: '#D55E00'},
+  };
+
+  // ── Melting curves per column (raw + Tm marker) ───────────────────────
+  const meltSets = [];
+  r.per_curve.forEach((c, i) => {
+    const color = multiPalette[i % multiPalette.length];
+    meltSets.push({
+      label: `${c.name} · ${c.oligoC} µM`,
+      data: zip(r.T_all, c.signal_all),
+      borderColor: color,
+      borderWidth: 3,
+      pointRadius: 0, showLine: true, tension: 0,
+    });
+    // Tm marker — vertical from min to max signal at TmRaw
+    const ys = c.signal_all.filter(v => v != null && !isNaN(v));
+    if (ys.length && c.TmRaw != null) {
+      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      meltSets.push({
+        label: `${c.name} Tm`,
+        data: [{x: c.TmRaw, y: yMin}, {x: c.TmRaw, y: yMax}],
+        borderColor: color,
+        borderWidth: 1.5,
+        borderDash: [3, 3],
+        pointRadius: 0, showLine: true, order: -1,
+      });
+    }
+  });
+  meltRange.low  = r.T_used[0];
+  meltRange.high = r.T_used[r.T_used.length - 1];
+  rebuildChart('chartMelt', {
+    type: 'scatter', data: {datasets: meltSets},
+    options: scatterOpts('Temperature (°C)', 'Signal',
+      {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
+    ),
+    plugins: [analysisRangePlugin()],
+  });
+
+  // ── 1/Tm vs ln(C_T/f) regression on chartAlpha ───────────────────────
+  const xLabel = `ln(C_T/${f})`;
+  document.getElementById('alphaTitle').innerHTML =
+    `Concentration series &middot; 1/T<sub>m</sub> vs ln(C<sub>T</sub>/${f})`;
+  const alphaSets = [];
+  ['raw', 'vh', 'fit'].forEach(key => {
+    const s = series[key];
+    if (!s) return;
+    const meta = methodMeta[key];
+    alphaSets.push({
+      label: `${meta.label} fit`,
+      data: s.ln_ct_line.map((x, i) => ({x, y: s.inv_tm_line[i]})),
+      borderColor: meta.color, borderWidth: 2.5, borderDash: [5, 3],
+      pointRadius: 0, showLine: true,
+    });
+    alphaSets.push({
+      label: `${meta.label} data`,
+      data: s.ln_ct.map((x, i) => ({x, y: s.inv_tm[i]})),
+      borderColor: meta.color,
+      backgroundColor: meta.color,
+      pointRadius: 5, showLine: false,
+    });
+  });
+  rebuildChart('chartAlpha', {
+    type: 'scatter',
+    data: {datasets: alphaSets},
+    options: scatterOpts(xLabel, '1/Tm (K⁻¹)', {
+      plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}},
+    }),
+  });
+
+  // Hide derivative chart — not meaningful for this view.
+  if (charts.chartDeriv) { charts.chartDeriv.destroy(); delete charts.chartDeriv; }
+
+  // ── Result cards (raw-Tm summary) ─────────────────────────────────────
+  const fmtCard = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
+  let html = '';
+  html += card('ΔH° (raw Tₘ)',  fmtCard(vh.dH), null, 'kcal/mol');
+  html += card('ΔS° (raw Tₘ)',  fmtCard(vh.dS * 1000, 1), null, 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (raw Tₘ)', fmtCard(vh.dG_37), null, 'kcal/mol');
+  html += card('R² (raw Tₘ)',   fmtCard(vh.r_squared, 4), null, '');
+  html += card('n points',      r.per_curve.length, null, '');
+  document.getElementById('resultsGrid').innerHTML = html;
+  document.getElementById('fitResults').classList.remove('hidden');
+
+  // ── Per-curve table + regression-comparison table via vhoffSection ────
+  const sec = document.getElementById('vhoffSection');
+  sec.classList.remove('hidden');
+  const fmtT  = v => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(2);
+  const fmtIT = v => (v == null || !isFinite(v) || v <= 0) ? '—' : (1 / v).toExponential(5);
+  document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map(c => `
+    <tr>
+      <td>${c.name}</td>
+      <td>${c.oligoC}</td>
+      <td>${(+c.lnCT).toFixed(4)}</td>
+      <td>${fmtT(c.TmRaw)}</td>
+      <td>${fmtIT(c.TmRaw_K ?? c.TmKelvin)}</td>
+      <td>${fmtT(c.TmvH)}</td>
+      <td>${fmtIT(c.TmvH_K)}</td>
+      <td>${fmtT(c.Tmfit)}</td>
+      <td>${fmtIT(c.Tmfit_K)}</td>
+    </tr>`).join('');
+
+  document.getElementById('vhoffRegHeader').innerHTML =
+    `Linear regression: 1/T<sub>m</sub> = (R/ΔH)·ln(C<sub>T</sub>/${f}) + ΔS/ΔH ` +
+    `<span class="text-muted normal-case">· f = ${f} (${r.self_complementary ? 'self-complementary' : 'non-self-complementary'})</span>`;
+  const reg = document.getElementById('vhoffReg');
+  reg.classList.remove('hidden');
+  document.getElementById('vhoffRegValues').innerHTML = ['raw', 'vh', 'fit'].map(key => {
+    const s = series[key];
+    const meta = methodMeta[key];
+    if (!s) {
+      return `<tr>
+        <td><span style="color:${meta.color}">●</span> ${meta.label}</td>
+        <td colspan="7" class="text-muted">— too few valid points —</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td><span style="color:${meta.color}">●</span> ${meta.label}</td>
+      <td>${s.n}</td>
+      <td>${(+s.slope).toExponential(3)}</td>
+      <td>${(+s.intercept).toExponential(3)}</td>
+      <td>${(+s.dH).toFixed(2)}</td>
+      <td>${(+s.dS * 1000).toFixed(1)}</td>
+      <td>${(+s.dG_37).toFixed(2)}</td>
+      <td>${(+s.r_squared).toFixed(4)}</td>
+    </tr>`;
+  }).join('');
+
+  if (r.skipped && r.skipped.length) {
+    const lines = r.skipped.map(s => `${s.name}: ${s.reason}`).join(' · ');
+    showInfo(`Skipped ${r.skipped.length} column(s) — ${lines}`);
+  } else {
+    hideInfo();
+  }
+}
+
 function accumulateColumnResult(r) {
   const col = r.name || document.getElementById('colSelect').value;
   if (!col) return;
+  const prev = colResults[col] || {};
   colResults[col] = {
+    ...prev,
     TmRaw:  r.TmRaw,
     vh:     r.vantHoff?.success ? r.vantHoff    : null,
     fit:    r.fit_result?.success ? r.fit_result : null,
@@ -766,6 +1034,10 @@ function renderColResults() {
       <td>${fmt(e.fit?.dH)}</td>
       <td>${e.fit ? fmt(e.fit.dS * 1000, 1) : '—'}</td>
       <td>${fmt(e.fit?.dG)}</td>
+      <td>${fmt(e.multi?.T_m_fit)}</td>
+      <td>${fmt(e.multi?.dH)}</td>
+      <td>${e.multi ? fmt(e.multi.dS * 1000, 1) : '—'}</td>
+      <td>${fmt(e.multi?.dG)}</td>
       <td><button onclick="removeColResult('${c.replace(/'/g, "\\'")}')" class="text-muted hover:text-red-500 font-mono text-xs px-1">✕</button></td>
     </tr>`;
   }).join('');
@@ -832,12 +1104,13 @@ window.removeVhoff=function(i){
 // ── Download ──────────────────────────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click',()=>{
   const cols = Object.keys(colResults);
-  if (!cols.length) return;
+  if (!cols.length && !lastConcResult) return;
   const headers = [
     'column',
     'Tm_raw_C',
     'Tm_vH_C', 'dH_vH_kcal_mol', 'dS_vH_cal_molK', 'dG37_vH_kcal_mol',
     'Tm_fit_C', 'dH_fit_kcal_mol', 'dS_fit_cal_molK', 'dG37_fit_kcal_mol',
+    'Tm_multi_C', 'dH_multi_kcal_mol', 'dS_multi_cal_molK', 'dG37_multi_kcal_mol',
   ];
   const cell = (v, scale=1) => (v == null || isNaN(v)) ? '' : (+v * scale).toString();
   const lines = [headers.join(',')];
@@ -846,19 +1119,109 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     lines.push([
       `"${c.replace(/"/g, '""')}"`,
       cell(e.TmRaw),
-      cell(e.vh?.T_m_vH),  cell(e.vh?.dH),  cell(e.vh?.dS, 1000),  cell(e.vh?.dG),
-      cell(e.fit?.T_m_fit),cell(e.fit?.dH), cell(e.fit?.dS, 1000), cell(e.fit?.dG),
+      cell(e.vh?.T_m_vH),    cell(e.vh?.dH),    cell(e.vh?.dS, 1000),    cell(e.vh?.dG),
+      cell(e.fit?.T_m_fit),  cell(e.fit?.dH),   cell(e.fit?.dS, 1000),   cell(e.fit?.dG),
+      cell(e.multi?.T_m_fit),cell(e.multi?.dH), cell(e.multi?.dS, 1000), cell(e.multi?.dG),
     ].join(','));
   }
+
+  if (lastConcResult) {
+    const cr     = lastConcResult;
+    const csers  = cr.series || {raw: cr.vantHoff, vh: null, fit: null};
+    const f      = cr.self_complementary ? 1 : 4;
+    const invK   = v => (v == null || !isFinite(v) || v <= 0) ? '' : (1 / v).toString();
+    lines.push('');
+    lines.push(`# concentration series (struct=${cr.struct_type}, self_complementary=${cr.self_complementary}, f=${f})`);
+    lines.push([
+      'column','CT_uM','CT_M','ln_CT_over_f',
+      'Tm_raw_C','inv_Tm_raw_K',
+      'Tm_vH_C','inv_Tm_vH_K',
+      'Tm_fit_C','inv_Tm_fit_K',
+    ].join(','));
+    cr.per_curve.forEach(c => {
+      lines.push([
+        `"${c.name.replace(/"/g, '""')}"`,
+        cell(c.oligoC),
+        cell(c.c0),
+        cell(c.lnCT),
+        cell(c.TmRaw),    invK(c.TmRaw_K ?? c.TmKelvin),
+        cell(c.TmvH),     invK(c.TmvH_K),
+        cell(c.Tmfit),    invK(c.Tmfit_K),
+      ].join(','));
+    });
+    lines.push('');
+    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared'].join(','));
+    [['raw','Tm_raw'], ['vh','Tm_vH'], ['fit','Tm_fit']].forEach(([key, lbl]) => {
+      const s = csers[key];
+      if (!s) {
+        lines.push([lbl, '0', '', '', '', '', '', ''].join(','));
+        return;
+      }
+      lines.push([
+        lbl,
+        String(s.n),
+        cell(s.slope),
+        cell(s.intercept),
+        cell(s.dH),
+        cell(s.dS, 1000),
+        cell(s.dG_37),
+        cell(s.r_squared),
+      ].join(','));
+    });
+    if (cr.skipped && cr.skipped.length) {
+      lines.push('');
+      lines.push(['skipped_column','reason'].join(','));
+      cr.skipped.forEach(s => {
+        lines.push([
+          `"${s.name.replace(/"/g, '""')}"`,
+          `"${(s.reason || '').replace(/"/g, '""')}"`,
+        ].join(','));
+      });
+    }
+  }
+
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'text/csv'}));
   a.download = 'rna_melt_results.csv';
   a.click();
 });
 
+// ── Download plots ────────────────────────────────────────────────────────────
+document.getElementById('downloadPlotsBtn').addEventListener('click', () => {
+  const slug = s => (s || 'rna_melt')
+    .toString()
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'rna_melt';
+
+  let prefix = 'rna_melt';
+  if (lastConcResult) prefix = 'rna_melt_concentration';
+  else if (lastResult?.is_multi) prefix = 'rna_melt_multi';
+  else if (lastResult?.name)     prefix = `rna_melt_${slug(lastResult.name)}`;
+
+  const labels = {chartMelt: 'curve', chartAlpha: 'vant_hoff', chartDeriv: 'derivative'};
+  let n = 0;
+  for (const id of ['chartMelt', 'chartAlpha', 'chartDeriv']) {
+    const c = charts[id];
+    if (!c || !c.canvas) continue;
+    const a = document.createElement('a');
+    a.href     = c.toBase64Image('image/png', 1.0);
+    a.download = `${prefix}_${labels[id]}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    n++;
+  }
+  if (!n) showError('No plots to download — run an analysis first.');
+});
+
 // ── Reset ─────────────────────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
-  dfLoaded=false; lastResult=null; vhoffPoints=[];
+  dfLoaded=false; lastResult=null; vhoffPoints=[]; lastConcResult=null;
+  document.getElementById('vhoffSection').classList.add('hidden');
+  document.getElementById('vhoffReg').classList.add('hidden');
+  document.getElementById('vhoffTableBody').innerHTML='';
+  document.getElementById('vhoffRegValues').innerHTML='';
   document.getElementById('uploadSection').style.display='';
   document.getElementById('resultsSection').classList.add('hidden');
   document.getElementById('fileInput').value='';
@@ -870,7 +1233,6 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
   document.getElementById('bl_lower_offset').value='10';
   document.getElementById('bl_upper_offset').value='10';
   //document.getElementById('fixBaselines').checked=false;
-  document.getElementById('vhoffSection').classList.add('hidden');
   for (const k of Object.keys(colResults)) delete colResults[k];
   renderColResults();
   Object.values(charts).forEach(c=>c?.destroy());
@@ -882,16 +1244,18 @@ function collectParams() {
   const g=id=>{ const v=document.getElementById(id).value; return v===''?null:parseFloat(v); };
   const col = document.getElementById('colSelect').value || null;
   const isMulti = col === '__multi__';
+  const isConc  = col === '__concentration__';
+  const isPerCol = isMulti || isConc;
   const params={
     signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
-    structure_type:  document.querySelector('input[name="structType"]:checked')?.value  || 'monomer',
-    column:          col,
+    struct_type:     document.querySelector('input[name="structType"]:checked')?.value  || 'heterodimer',
+    column:          isMulti ? '__multi__' : isConc ? '__concentration__' : col,
     bl_lower_offset: g('bl_lower_offset') ?? 10,
     bl_upper_offset: g('bl_upper_offset') ?? 10,
-    salt:            isMulti ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
+    salt:            isPerCol ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
     oligo:           g('CT') ?? 0.5,
   };
-  if (isMulti) {
+  if (isPerCol) {
     const oligoMulti = {};
     document.querySelectorAll('.multi-ct').forEach(el => {
       const v = parseFloat(el.value);
@@ -954,14 +1318,32 @@ function rebuildChart(id,config){
   if(ctx) charts[id]=new Chart(ctx,config);
 }
 
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.resetZoomBtn');
+  if (!btn) return;
+  const id = btn.dataset.resetChart;
+  const c  = charts[id];
+  if (c && typeof c.resetZoom === 'function') c.resetZoom();
+});
+
+function zoomPluginCfg(){
+  return {
+    zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'xy'},
+    pan:{enabled:true,mode:'xy',threshold:5},
+  };
+}
+
 function scatterOpts(xLabel,yLabel,extra={}){
+  const {plugins:extraPlugins, scales:extraScales, ...rest} = extra;
   return {
     responsive:true, animation:{duration:300},
-    plugins:{legend:{display:false},...(extra.plugins||{})},
+    ...rest,
+    plugins:{legend:{display:false},zoom:zoomPluginCfg(),...(extraPlugins||{})},
     scales:{
       x:{title:{display:true,text:xLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
       y:{title:{display:true,text:yLabel,font:{size:11},color:'#888'},grid:{color:'#e8e6de'},ticks:{font:{family:'DM Mono',size:10}}},
-    },...extra,
+      ...(extraScales||{}),
+    },
   };
 }
 
@@ -1027,6 +1409,8 @@ function hideRunning(){
 }
 function showError(msg){ const b=document.getElementById('errorBanner'); b.textContent='⚠ '+msg; b.classList.remove('hidden'); }
 function hideError(){ document.getElementById('errorBanner').classList.add('hidden'); }
+function showInfo(msg){ const b=document.getElementById('infoBanner'); b.textContent=msg; b.classList.remove('hidden'); }
+function hideInfo(){ document.getElementById('infoBanner').classList.add('hidden'); }
 
 boot();
 </script>
