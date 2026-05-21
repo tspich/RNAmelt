@@ -451,15 +451,15 @@ tailwind.config = {
 
 <script>
 const PYTHON_MODULES = [
-  { path: 'analysis/__init__.py' },
-  { path: 'analysis/methods.py' },
-  { path: 'analysis/functions.py' },
-  { path: 'analysis/constants.py' },
-  { path: 'analysis/util.py' },
-  { path: 'analysis/utils.py' },
-  { path: 'analysis/cleaning.py' },
-  { path: 'analysis/analysis_melting.py' },
-  { path: 'analysis/api.py' },
+  { path: 'rnamelt/__init__.py' },
+  { path: 'rnamelt/methods.py' },
+  { path: 'rnamelt/functions.py' },
+  { path: 'rnamelt/constants.py' },
+  { path: 'rnamelt/util.py' },
+  { path: 'rnamelt/utils.py' },
+  { path: 'rnamelt/cleaning.py' },
+  { path: 'rnamelt/analysis_melting.py' },
+  { path: 'rnamelt/api.py' },
 ];
 
 let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
@@ -480,7 +480,7 @@ async function boot() {
     setStatus('loading','Installing packages…');
     await pyodide.loadPackage(['pandas','numpy','scipy']);
     setStatus('loading','Loading modules…');
-    pyodide.FS.mkdir('/analysis');
+    pyodide.FS.mkdir('/rnamelt');
     for (const mod of PYTHON_MODULES) {
       const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`Cannot fetch ${mod.path} — serve via: python -m http.server`);
@@ -516,11 +516,11 @@ async function loadFile(file) {
   try {
     await pyodide.runPythonAsync(`
 import io, importlib, pandas as pd
-import analysis.cleaning as _cl; importlib.reload(_cl)
+import rnamelt.cleaning as _cl; importlib.reload(_cl)
 _df_global = _cl.clean(pd.read_csv(io.StringIO(csv_text_raw)))
 `);
     const info = JSON.parse(await pyodide.runPythonAsync(`
-import json; from analysis.cleaning import get_signal_columns
+import json; from rnamelt.cleaning import get_signal_columns
 _sig = get_signal_columns(_df_global)
 json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
   'T_min':float(_df_global['temperature'].min()),'T_max':float(_df_global['temperature'].max()),
@@ -630,10 +630,10 @@ async function runAnalysis() {
     pyodide.globals.set('_params_json', JSON.stringify(params));
     const raw = await pyodide.runPythonAsync(`
 import json, importlib
-import analysis.utils, analysis.methods, analysis.functions, analysis.cleaning
-importlib.reload(analysis.utils); importlib.reload(analysis.functions)
-importlib.reload(analysis.methods); importlib.reload(analysis.cleaning)
-import analysis.analysis_melting as _am; importlib.reload(_am)
+import rnamelt.utils, rnamelt.methods, rnamelt.functions, rnamelt.cleaning
+importlib.reload(rnamelt.utils); importlib.reload(rnamelt.functions)
+importlib.reload(rnamelt.methods); importlib.reload(rnamelt.cleaning)
+import rnamelt.analysis_melting as _am; importlib.reload(_am)
 _params = json.loads(_params_json)
 json.dumps(_am.run(_df_global, _params))
 `);

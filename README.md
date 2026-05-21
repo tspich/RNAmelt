@@ -1,12 +1,12 @@
-# RNAmelt — RNA / DNA Melting-Curve Analysis
+# RNAmelt — RNA Melting-Curve Analysis
 
 Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of UV-absorbance or
 fluorescence melting curves. The same Python pipeline runs in two places:
 
 - **Browser** — `index.html` loads Python via Pyodide (WebAssembly). Data
   never leaves the user's machine; no server, no install.
-- **CLI** — `python -m analysis FILE.csv [...]` for batch / scripted use.
-- **Python API** — `from analysis import analyze_single, analyze_multi,
+- **CLI** — `rnamelt FILE.csv [...]` for batch / scripted use.
+- **Python API** — `from rnamelt import analyze_single, analyze_multi,
   analyze_concentration, analyze_csv` for use in notebooks or larger
   pipelines.
 
@@ -14,8 +14,9 @@ fluorescence melting curves. The same Python pipeline runs in two places:
 
 ```
 RNAmelt/
+├── pyproject.toml          # Packaging metadata (pip-installable)
 ├── index.html              # Single-page UI: controls, charts (Chart.js), Pyodide bridge
-├── analysis/
+├── rnamelt/
 │   ├── __init__.py         # Public API re-exports
 │   ├── __main__.py         # CLI entry point
 │   ├── api.py              # Python API: analyze_single / _multi / _concentration / _csv
@@ -32,6 +33,22 @@ RNAmelt/
 
 Module layering is strict: `functions` → `methods` → `analysis_melting` →
 `__main__` / browser. `functions` stays stateless.
+
+## Installation
+
+```bash
+# from a clone of this repo
+pip install .
+
+# or editable install for development
+pip install -e .
+
+# with test deps
+pip install -e ".[test]"
+```
+
+This exposes the `rnamelt` console script and lets you `import rnamelt`
+from any working directory.
 
 ## CSV format
 
@@ -62,25 +79,25 @@ download produces.
 
 ```bash
 # default: van't Hoff + full fit on every signal column in the CSV
-python -m analysis melt.csv --csv-out batch.csv
+rnamelt melt.csv --csv-out batch.csv
 
 # single column
-python -m analysis melt.csv --column sample_1 --struct-type heterodimer \
+rnamelt melt.csv --column sample_1 --struct-type heterodimer \
     --oligo 5.0 --T-low 20 --T-high 90 --csv-out single.csv
 
 # shared-ΔH fit across all signal columns (defaults to all columns at --oligo
 # if no --oligo-multi is given)
-python -m analysis melt.csv --column __multi__ --struct-type heterodimer \
+rnamelt melt.csv --column __multi__ --struct-type heterodimer \
     --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50
 
 # concentration-series van't Hoff (1/Tm vs ln(C_T/f)) — requires --oligo-multi
-python -m analysis melt.csv --column __concentration__ --struct-type heterodimer \
+rnamelt melt.csv --column __concentration__ --struct-type heterodimer \
     --oligo-multi sample_1=0.5 --oligo-multi sample_2=5.0 --oligo-multi sample_3=50 \
     --csv-out conc.csv
 ```
 
-`python -m analysis --help` lists every flag. Exit code is 0 on success,
-1 if the analysis returns an error, 2 on bad input.
+`rnamelt --help` lists every flag (equivalent: `python -m rnamelt --help`).
+Exit code is 0 on success, 1 if the analysis returns an error, 2 on bad input.
 
 ## Python API
 
@@ -90,10 +107,10 @@ return a plain dict.
 
 ```python
 import pandas as pd
-from analysis import (
+from rnamelt import (
     analyze_single, analyze_multi, analyze_concentration, analyze_csv,
 )
-from analysis.cleaning import clean
+from rnamelt.cleaning import clean
 
 df = clean(pd.read_csv("melt.csv"))
 
@@ -126,8 +143,8 @@ analyze_csv("melt.csv", mode="concentration",
 
 ## Analysis modes
 
-All three modes go through `analysis_melting.run(df, params)`; the
-`column` param selects the mode.
+All three modes go through `rnamelt.analysis_melting.run(df, params)`;
+the `column` param selects the mode.
 
 | `column` value      | Mode                       | What it does |
 |---------------------|----------------------------|--------------|
@@ -156,7 +173,7 @@ Units throughout: ΔH in kcal/mol, ΔS in kcal/(mol·K), T in K
 python -m unittest discover tests
 ```
 
-Tests run outside the browser against the same `analysis/` package the
+Tests run outside the browser against the same `rnamelt/` package the
 browser loads.
 
 ## Deployment

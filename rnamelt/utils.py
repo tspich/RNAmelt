@@ -4,7 +4,7 @@ utils.py — shared helpers for RNA melting analysis.
 
 import numpy as np
 
-R = 8.314  # J/(mol·K)
+#R = 8.314  # J/(mol·K)
 
 
 def celsius_to_kelvin(T_celsius):

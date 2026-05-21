@@ -26,11 +26,8 @@ Adjustable parameters passed in via `params` dict
 """
 
 import numpy as np
-#from scipy.optimize import curve_fit
-#from scipy.signal import savgol_filter
-from analysis.utils import safe_json
-#from analysis.util import analyze
-from analysis import methods, functions, constants
+from rnamelt.utils import safe_json
+from rnamelt import methods, functions, constants
 
 # ─── Main entry point ────────────────────────────────────────────────────────
 
@@ -45,7 +42,7 @@ def run(df, params: dict):# -> dict:
         CT            (float, M)    strand concentration for 1/Tm vs ln[CT]
         column        (str)         which signal column to fit
     """
-    from analysis.cleaning import get_signal_columns
+    from rnamelt.cleaning import get_signal_columns
 
     T_all      = df["temperature"].values.astype(float)
     sig_cols   = get_signal_columns(df)
@@ -69,8 +66,8 @@ def run(df, params: dict):# -> dict:
         T_all      = T_all[valid]
         signal_all = signal_all[valid]
 
-        if len(T_all) < 10:
-            return {"name": "Melting Analysis", "error": "Not enough data points."}
+        #if len(T_all) < 10:
+        #    return {"name": "Melting Analysis", "error": "Not enough data points."}
 
         T_min, T_max = float(T_all.min()), float(T_all.max())
 
@@ -88,19 +85,15 @@ def run(df, params: dict):# -> dict:
         TT = T_all[pos_start:pos_end]
         used_data = signal_all[pos_start:pos_end]
 
-        c0 = 1e-6 * oligo_concentration*2
-
-        #signal_type = params.get("signal_type", "absorbance")
+        ##signal_type = params.get("signal_type", "absorbance")
         struct_type = params.get("struct_type", "heterodimer")
+        c0 = 1e-6 * oligo_concentration * constants.STRAND_STOICHIOMETRY[struct_type]
         base_b_offset = params.get("bl_lower_offset", 10)
         base_ub_offset = params.get("bl_upper_offset", 10)
+        solver = params.get("solver")
+        vh_kwargs = methods._vh_kwargs(params.get("vh"))
+        fit_init = methods._fit_init_kwargs(params.get("fit_init"))
 
-
-        #if signal_type == "absorbance":
-            # May implement automatic calculation of the oligo conc.
-            # through the extinction coefficient at some point.
-
-        # if signal_type == "fluorescence":
         r_base_b_maxT=T_low+base_b_offset
         r_base_ub_minT=T_high-base_ub_offset
 
@@ -111,26 +104,17 @@ def run(df, params: dict):# -> dict:
             baseline_unbound_minT=r_base_ub_minT,
             #debug=True
         )
-        #print(T_m_raw, base_b_r, base_ub_r, base_med_r)
 
         try:
-            #print(len(TT), len(used_data), len(T_all), len(signal_all))
-            #print('c0', c0)
-            #print('struct_type', struct_type)
-
             T_m_vH, dG_37_vH, dH_vH, dS_vH, t1, K, xdata, ydata, fit_vh = methods.vantHoff(
                 TT,
                 used_data,
                 *base_b_r,
                 *base_ub_r,
                 c0,
-                border = 0.15,
-                #t1_min = t1_min,
-                #t1_max = t1_max
                 structType = struct_type,
+                **vh_kwargs,
             )
-
-            #print('vantHoff', T_m_vH, dG_37_vH, dH_vH, dS_vH)
 
             vantHoff = {
                 "success": True,
@@ -152,43 +136,41 @@ def run(df, params: dict):# -> dict:
             }
 
 
-        if vantHoff['success']:
-            print(vantHoff["dH"])
-            if -150 < vantHoff["dH"] < 0:
-                dH_init = vantHoff["dH"]
-            else:
-                dH_init = -80
-            if -5 < vantHoff["dS"] < 0:
-                dS_init = vantHoff["dS"]
-            else:
-                dS_init = -0.2
+        # User-supplied fit_init values override the vH-seeded / fallback
+        # auto-seeding below.
+        if fit_init["dH_init"] is not None:
+            dH_init = fit_init["dH_init"]
+        elif vantHoff['success'] and -150 < vantHoff["dH"] < 0:
+            dH_init = vantHoff["dH"]
         else:
             dH_init = -80
+
+        if fit_init["dS_init"] is not None:
+            dS_init = fit_init["dS_init"]
+        elif vantHoff['success'] and -5 < vantHoff["dS"] < 0:
+            dS_init = vantHoff["dS"]
+        else:
             dS_init = -0.2
 
         try:
-            #print(len(TT), TT[0], TT[-1])
-            #print(len(used_data), min(used_data), max(used_data))
-            #print('c0', c0)
-            #print('dH_init', dH_init)
-            #print('dS_init', dS_init)
-
             dG_37_f, dH_f, dS_f, T_m_f, y_f, base_b_f, base_ub_f, base_med_f = methods.fit_full_function(
                 TT,
                 used_data,
                 c0=c0,
-                dH_init = dH_init,
-                dS_init = dS_init,
+                dH_init  = dH_init,
+                dS_init  = dS_init,
+                lin_init = fit_init["lin_init"],
+                b1_init  = fit_init["b1_init"],
+                b2_init  = fit_init["b2_init"],
+                solver   = solver,
             )
-
-            #print(dG_37_f, dH_f, dS_f, T_m_f)
 
             fit = np.array([ functions.full_function(
                 tt, dH_f, dS_f, *base_b_f, *base_ub_f, c0=c0
             ) for tt in TT ])
 
             # NOTE: May need to check that, not general enough?
-            derivative = np.gradient(used_data, 0.5)/-1.
+            derivative = np.gradient(used_data, TT)/-1.
 
             fit_result = {
                 "success":    True,
@@ -234,6 +216,10 @@ def _run_multi(df, params: dict, T_all, sig_cols):
     """Simultaneous fit across all signal columns sharing dH, dS; independent baselines."""
     oligo_multi = params.get("oligo_multi") or {}
     salt_c      = float(params.get("salt", 150))
+    struct_type = params.get("struct_type", "heterodimer")
+    stoich      = constants.STRAND_STOICHIOMETRY[struct_type]
+    solver      = params.get("solver")
+    fit_init    = methods._fit_init_kwargs(params.get("fit_init"))
 
     T_min, T_max = float(T_all.min()), float(T_all.max())
     T_low  = float(params.get("T_low",  T_min))
@@ -250,7 +236,7 @@ def _run_multi(df, params: dict, T_all, sig_cols):
             continue
         oligo = float(oligo_multi.get(c, 0.5))
         ds.append(sig[pos_start:pos_end])
-        cs.append(1e-6 * oligo * 2)
+        cs.append(1e-6 * oligo * stoich)
         oligos.append(oligo)
         col_names.append(c)
         signals_all.append(sig)
@@ -259,8 +245,20 @@ def _run_multi(df, params: dict, T_all, sig_cols):
         return {"name": "Melting Analysis", "error": "multi fit needs at least 2 valid columns"}
 
     try:
+        # Multi mode has no per-curve vH seed available, so fall back to
+        # -80 / -0.2 when the user hasn't overridden via fit_init.
+        # b1_init / b2_init are per-curve in multi mode and intentionally
+        # not exposed through the bundle — fit_full_function_multi
+        # auto-computes them.
+        dH_init = fit_init["dH_init"] if fit_init["dH_init"] is not None else -80
+        dS_init = fit_init["dS_init"] if fit_init["dS_init"] is not None else -0.2
         dG_37, dH, dS, T_ms, y_dats, bl_lo, bl_hi, bl_me = methods.fit_full_function_multi(
-            TT, ds, cs=cs, dH_init=-80, dS_init=-0.2,
+            TT, ds, cs=cs,
+            dH_init    = dH_init,
+            dS_init    = dS_init,
+            lin_init   = fit_init["lin_init"],
+            structType = struct_type,
+            solver     = solver,
         )
     except Exception as e:
         return {"name": "Melting Analysis", "error": f"multi fit failed: {e}"}
@@ -309,6 +307,9 @@ def _run_concentration(df, params: dict, T_all, sig_cols):
 
     oligo_multi = params.get("oligo_multi") or {}
     salt_c      = float(params.get("salt", 150))
+    solver      = params.get("solver")
+    vh_kwargs   = methods._vh_kwargs(params.get("vh"))
+    fit_init    = methods._fit_init_kwargs(params.get("fit_init"))
 
     T_min, T_max = float(T_all.min()), float(T_all.max())
     T_low  = float(params.get("T_low",  T_min))
@@ -345,7 +346,7 @@ def _run_concentration(df, params: dict, T_all, sig_cols):
             continue
 
         used_data = sig[pos_start:pos_end]
-        c_M = 1e-6 * oligo_uM * 2  # match c0 convention used elsewhere in this file
+        c_M = 1e-6 * oligo_uM * constants.STRAND_STOICHIOMETRY[struct_type]
 
         # ── raw Tm via baseline intersection (mandatory) ──────────────────
         try:
@@ -368,18 +369,35 @@ def _run_concentration(df, params: dict, T_all, sig_cols):
         try:
             T_m_vH_C, _, dH_vh_seed, dS_vh_seed, *_ = methods.vantHoff(
                 TT, used_data, *base_b, *base_ub, c_M,
-                border=0.15, structType=struct_type,
+                structType=struct_type, **vh_kwargs,
             )
         except Exception:
             T_m_vH_C = None
 
         # ── full curve fit Tm (best effort) ───────────────────────────────
-        dH_init = dH_vh_seed if (dH_vh_seed is not None and -150 < dH_vh_seed < 0) else -80.0
-        dS_init = dS_vh_seed if (dS_vh_seed is not None and -5 < dS_vh_seed < 0) else -0.2
+        # User-supplied fit_init values override the vH-seeded / fallback chain.
+        if fit_init["dH_init"] is not None:
+            dH_init = fit_init["dH_init"]
+        elif dH_vh_seed is not None and -150 < dH_vh_seed < 0:
+            dH_init = dH_vh_seed
+        else:
+            dH_init = -80.0
+
+        if fit_init["dS_init"] is not None:
+            dS_init = fit_init["dS_init"]
+        elif dS_vh_seed is not None and -5 < dS_vh_seed < 0:
+            dS_init = dS_vh_seed
+        else:
+            dS_init = -0.2
+
         T_m_fit_C = None
         try:
             _, _, _, T_m_fit_C, *_ = methods.fit_full_function(
-                TT, used_data, c0=c_M, dH_init=dH_init, dS_init=dS_init,
+                TT, used_data, c0=c_M,
+                dH_init  = dH_init,
+                dS_init  = dS_init,
+                lin_init = fit_init["lin_init"],
+                solver   = solver,
             )
         except Exception:
             T_m_fit_C = None

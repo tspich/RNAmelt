@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis import methods, constants
+from rnamelt import methods, constants
 
 
 def _synthesize_tm(dH: float, dS: float, concentrations: np.ndarray, f: float) -> np.ndarray:

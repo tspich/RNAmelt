@@ -2,10 +2,11 @@
 
 Usage
 -----
-    python -m analysis FILE.csv [options]
+    rnamelt FILE.csv [options]              # installed via pip
+    python -m rnamelt FILE.csv [options]    # equivalent module form
 
-The CLI loads the CSV, runs `analysis.cleaning.clean`, and dispatches to
-the appropriate `analysis.api` function. The full result is printed as
+The CLI loads the CSV, runs `rnamelt.cleaning.clean`, and dispatches to
+the appropriate `rnamelt.api` function. The full result is printed as
 JSON on stdout; pass `--csv-out PATH` to also write a results CSV in the
 format produced by the browser download.
 """
@@ -19,8 +20,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from analysis import analyze_concentration, analyze_multi, analyze_single
-from analysis.cleaning import clean, get_signal_columns
+from rnamelt import analyze_concentration, analyze_multi, analyze_single
+from rnamelt.cleaning import clean, get_signal_columns
 
 
 def _parse_oligo_multi(values):
@@ -41,7 +42,7 @@ def _parse_oligo_multi(values):
 
 def _build_argparser():
     p = argparse.ArgumentParser(
-        prog="python -m analysis",
+        prog="rnamelt",
         description="RNA melting curve analysis — single column, multi (shared ΔH), "
                     "or concentration-series van't Hoff.",
     )
@@ -77,20 +78,140 @@ def _build_argparser():
                    help="write a results CSV (same format as the browser download)")
     p.add_argument("--indent", type=int, default=2,
                    help="JSON indent for stdout (0 = compact). Default: 2")
+
+    # ── scipy.optimize.least_squares overrides (full-function fit) ─────
+    s = p.add_argument_group(
+        "solver options",
+        "Overrides forwarded to scipy.optimize.least_squares for the full "
+        "two-state nonlinear fit. Unset flags fall back to defaults tuned "
+        "for in-browser use (see rnamelt.methods.SOLVER_DEFAULTS).",
+    )
+    s.add_argument("--max-nfev", type=int, default=None,
+                   help="maximum function evaluations. Default: 10000 (browser-safe)")
+    s.add_argument("--ftol", type=float, default=None,
+                   help="cost-function tolerance. Default: 1e-8")
+    s.add_argument("--gtol", type=float, default=None,
+                   help="gradient tolerance. Default: 1e-8")
+    s.add_argument("--xtol", type=float, default=None,
+                   help="step-size tolerance. Default: 1e-8")
+    s.add_argument("--method", default=None, choices=["trf", "dogbox", "lm"],
+                   help="trust-region algorithm. Default: trf. "
+                        "Note: 'lm' does not support bounds and will error here.")
+    s.add_argument("--loss", default=None,
+                   choices=["linear", "soft_l1", "huber", "cauchy", "arctan"],
+                   help="residual loss function. Default: linear (least squares). "
+                        "Use soft_l1/huber for outlier-robust fits.")
+    s.add_argument("--f-scale", type=float, default=None,
+                   help="soft-margin transition value for non-linear losses. Default: 1.0")
+    s.add_argument("--jac", default=None, choices=["2-point", "3-point", "cs"],
+                   help="Jacobian estimation scheme. Default: 2-point")
+    s.add_argument("--solver-verbose", type=int, default=None, choices=[0, 1, 2],
+                   help="0 silent, 1 termination report, 2 per-iteration. Default: 0")
+    s.add_argument("--residuals-method", default=None,
+                   choices=["linear", "square", "cubic", "quadratic"],
+                   help="multi-fit only: how per-curve residuals are aggregated "
+                        "into the scalar passed to least_squares. Default: square. "
+                        "Ignored by single-curve and concentration-series fits.")
+
+    # ── van't Hoff linearisation overrides ────────────────────────────
+    v = p.add_argument_group(
+        "van't Hoff options",
+        "Overrides for the linear-fit step of the van't Hoff analysis "
+        "(see rnamelt.methods.VH_DEFAULTS). Ignored by the multi-fit mode.",
+    )
+    v.add_argument("--vh-border", type=float, default=None,
+                   help="fraction-folded cutoff θ; points with θ outside "
+                        "[border, 1-border] are excluded from the regression. "
+                        "Default: 0.15")
+    v.add_argument("--vh-t1-min", type=float, default=None,
+                   help="lower clip on the linearised x-axis "
+                        "(T_scale/(T_C-T0) units; -1 = no clip). Default: -1")
+    v.add_argument("--vh-t1-max", type=float, default=None,
+                   help="upper clip on the linearised x-axis "
+                        "(T_scale/(T_C-T0) units; -1 = no clip). Default: -1")
+    v.add_argument("--vh-T-scale", type=float, default=None,
+                   help="numerical conditioning factor for 1/T. Default: 1000")
+
+    # ── Full-fit initial guesses ──────────────────────────────────────
+    fi = p.add_argument_group(
+        "fit-init options",
+        "Initial guesses for the full two-state nonlinear fit "
+        "(see rnamelt.methods.FIT_INIT_DEFAULTS). When --dH-init / --dS-init "
+        "are not set, ΔH / ΔS are auto-seeded from the van't Hoff result "
+        "(or fall back to -80 / -0.2 if van't Hoff fails). "
+        "Setting them here overrides that auto-seeding.",
+    )
+    fi.add_argument("--dH-init", type=float, default=None,
+                    help="ΔH initial guess in kcal/mol")
+    fi.add_argument("--dS-init", type=float, default=None,
+                    help="ΔS initial guess in kcal/(mol·K)")
+    fi.add_argument("--lin-init", type=int, default=None,
+                    help="number of leading/trailing data points averaged "
+                         "for the baseline-intercept seed. Default: 10")
     return p
+
+
+def _build_solver(args):
+    """Collect --max-nfev / --ftol / … into a dict (None values dropped)."""
+    raw = {
+        "max_nfev":         args.max_nfev,
+        "ftol":             args.ftol,
+        "gtol":             args.gtol,
+        "xtol":             args.xtol,
+        "method":           args.method,
+        "loss":             args.loss,
+        "f_scale":          args.f_scale,
+        "jac":              args.jac,
+        "verbose":          args.solver_verbose,
+        "residuals_method": args.residuals_method,
+    }
+    return {k: v for k, v in raw.items() if v is not None}
+
+
+def _build_vh(args):
+    """Collect --vh-border / --vh-t1-min / … into a dict (None values dropped)."""
+    raw = {
+        "border":  args.vh_border,
+        "t1_min":  args.vh_t1_min,
+        "t1_max":  args.vh_t1_max,
+        "T_scale": args.vh_T_scale,
+    }
+    return {k: v for k, v in raw.items() if v is not None}
+
+
+def _build_fit_init(args):
+    """Collect --dH-init / --dS-init / --lin-init into a dict (None values dropped)."""
+    raw = {
+        "dH_init":  args.dH_init,
+        "dS_init":  args.dS_init,
+        "lin_init": args.lin_init,
+        "b1_init":  args.lin_init,
+        "b2_init":  args.lin_init,
+    }
+    return {k: v for k, v in raw.items() if v is not None}
 
 
 def _common_kwargs(args):
     """Kwargs shared by analyze_single / analyze_multi / analyze_concentration."""
-    return {
+    out = {
         "struct_type":     args.struct_type,
-        "signal_type":     args.signal_type,
+        #"signal_type":     args.signal_type,
         "salt":            args.salt,
         "T_low":           args.T_low,
         "T_high":          args.T_high,
         "bl_lower_offset": args.bl_lower,
         "bl_upper_offset": args.bl_upper,
     }
+    solver = _build_solver(args)
+    if solver:
+        out["solver"] = solver
+    vh = _build_vh(args)
+    if vh:
+        out["vh"] = vh
+    fit_init = _build_fit_init(args)
+    if fit_init:
+        out["fit_init"] = fit_init
+    return out
 
 
 # ── CSV writer mirroring the browser download ─────────────────────────────
@@ -250,7 +371,6 @@ def main(argv=None):
 
     df = pd.read_csv(args.csv)
     df = clean(df)
-    #TODO: if values is None parse all available signals
     oligo_multi = _parse_oligo_multi(args.oligo_multi)
     common = _common_kwargs(args)
 

@@ -1,19 +1,20 @@
-"""analysis — RNA / DNA melting-curve thermodynamic analysis.
+"""rnamelt — RNA / DNA melting-curve thermodynamic analysis.
 
 Public API:
     analyze_single, analyze_multi, analyze_concentration  — DataFrame in
     analyze_csv                                           — path in
 """
 
-from analysis.api import (
+from rnamelt.api import (
     analyze_concentration,
     analyze_csv,
     analyze_multi,
     analyze_single,
 )
+from rnamelt.methods import FIT_INIT_DEFAULTS, SOLVER_DEFAULTS, VH_DEFAULTS
 
 ANALYSES = [
-    "analysis.analysis_melting",
+    "rnamelt.analysis_melting",
 ]
 
 __all__ = [
@@ -21,5 +22,8 @@ __all__ = [
     "analyze_multi",
     "analyze_concentration",
     "analyze_csv",
+    "SOLVER_DEFAULTS",
+    "VH_DEFAULTS",
+    "FIT_INIT_DEFAULTS",
     "ANALYSES",
 ]
