@@ -95,18 +95,23 @@ def _tup(x: Any) -> Optional[tuple]:
 
 @dataclass
 class VanHoffFit:
-    """Linearised van't Hoff regression (ln K vs 1/T)."""
-    ok:       bool                  = False
-    error:    Optional[str]         = None
-    dH:       Optional[float]       = None
-    dS:       Optional[float]       = None
-    dG:       Optional[float]       = None
-    Tm:       Optional[float]       = None
-    t1:       Optional[np.ndarray]  = None
-    K:        Optional[np.ndarray]  = None
-    xdata:    Optional[np.ndarray]  = None
-    ydata:    Optional[np.ndarray]  = None
-    fit_line: Optional[np.ndarray]  = None
+    """Linearised van't Hoff regression (ln K vs 1/T).
+
+    `fit_params` is the `(slope, intercept)` tuple of the linear fit in
+    the linearised x-axis (1000/(T-T0)) — multiply by `slope`·x + intercept
+    to recover the fitted ln(K) values.
+    """
+    ok:         bool                 = False
+    error:      Optional[str]        = None
+    dH:         Optional[float]      = None
+    dS:         Optional[float]      = None
+    dG:         Optional[float]      = None
+    Tm:         Optional[float]      = None
+    t1:         Optional[np.ndarray] = None
+    K:          Optional[np.ndarray] = None
+    xdata:      Optional[np.ndarray] = None
+    ydata:      Optional[np.ndarray] = None
+    fit_params: Optional[tuple]      = None
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "VanHoffFit":
@@ -115,16 +120,16 @@ class VanHoffFit:
         if not d.get("success", False):
             return cls(ok=False, error=d.get("error", "unknown"))
         return cls(
-            ok       = True,
-            dH       = d.get("dH"),
-            dS       = d.get("dS"),
-            dG       = d.get("dG"),
-            Tm       = d.get("T_m_vH"),
-            t1       = _arr(d.get("t1")),
-            K        = _arr(d.get("K")),
-            xdata    = _arr(d.get("xdata")),
-            ydata    = _arr(d.get("ydata")),
-            fit_line = _arr(d.get("fit_vh")),
+            ok         = True,
+            dH         = d.get("dH"),
+            dS         = d.get("dS"),
+            dG         = d.get("dG"),
+            Tm         = d.get("T_m_vH"),
+            t1         = _arr(d.get("t1")),
+            K          = _arr(d.get("K")),
+            xdata      = _arr(d.get("xdata")),
+            ydata      = _arr(d.get("ydata")),
+            fit_params = _tup(d.get("fit_vh")),
         )
 
     def require(self) -> "VanHoffFit":
@@ -261,6 +266,15 @@ class SingleResult:
         """Browser-download-equivalent CSV (header + one row)."""
         _write_rows(path, [_PER_COL_HEADER, self.to_csv_row()])
 
+    def plot(self, *, axes=None, figsize=(15, 5)):
+        """3-panel matplotlib figure: raw / van't Hoff / full fit.
+
+        Lazy-imports `matplotlib` and `rnamelt.plots` — neither is needed
+        for the analysis itself. Returns `(fig, axes)`.
+        """
+        from rnamelt import plots
+        return plots.plot_single(self, axes=axes, figsize=figsize)
+
 
 # ── multi (shared-ΔH) result ────────────────────────────────────────────────
 
@@ -357,6 +371,14 @@ class MultiResult:
     def to_csv(self, path) -> None:
         """Browser-download-equivalent CSV (header + one row per column)."""
         _write_rows(path, [_PER_COL_HEADER, *self.to_csv_rows()])
+
+    def plot(self, *, ax=None, figsize=(9, 6)):
+        """Single-panel matplotlib figure overlaying all columns' raw + fit curves.
+
+        Lazy-imports `matplotlib`. Returns `(fig, ax)`.
+        """
+        from rnamelt import plots
+        return plots.plot_multi(self, ax=ax, figsize=figsize)
 
 
 # ── concentration-series result ─────────────────────────────────────────────
@@ -573,6 +595,14 @@ class ConcentrationResult:
                 lines.append([entry.get("name", ""), entry.get("reason", "")])
 
         _write_rows(path, lines)
+
+    def plot(self, *, axes=None, figsize=(13, 5)):
+        """2-panel matplotlib figure: per-curve overlay + 1/Tm vs ln(C_T/f) regression.
+
+        Lazy-imports `matplotlib`. Returns `(fig, axes)`.
+        """
+        from rnamelt import plots
+        return plots.plot_concentration(self, axes=axes, figsize=figsize)
 
 
 # ── batch result (CLI: every signal column at the same oligo) ───────────────

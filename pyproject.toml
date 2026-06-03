@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rnamelt"
+version = "0.1.0"
+description = "Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of RNA melting curves"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "RNAmelt contributors" },
+]
+keywords = ["rna", "dna", "melting curve", "thermodynamics", "van't hoff", "biophysics"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.5"]
+
+[project.scripts]
+rnamelt = "rnamelt.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/tspich/RNAmelt"
+Issues = "https://github.com/tspich/RNAmelt/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rnamelt"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "rnamelt",
+    "README.md",
+    "pyproject.toml",
+]

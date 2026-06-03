@@ -173,6 +173,30 @@ class MeltAnalysis:
         """Run `single(...)` on every detected signal column."""
         return {c: self.single(c, oligo=oligo) for c in self.signal_columns}
 
+    # ── plotting (lazy matplotlib import via rnamelt.plots) ───────────────
+
+    def plot(
+        self,
+        column: Optional[str] = None,
+        *,
+        oligo: float = 0.5,
+        axes=None,
+        figsize=(15, 5),
+    ):
+        """Run `single(column)` and plot its 3-panel figure.
+
+        When `column` is None, the first detected signal column is used.
+        Returns `(fig, axes, SingleResult)`.
+        """
+        if column is None:
+            sigs = self.signal_columns
+            if not sigs:
+                raise ValueError("no signal columns")
+            column = sigs[0]
+        result = self.single(column, oligo=oligo)
+        fig, axes = result.plot(axes=axes, figsize=figsize)
+        return fig, axes, result
+
     # ── internals ──────────────────────────────────────────────────────
 
     def _params(self) -> dict:
