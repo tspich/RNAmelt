@@ -15,8 +15,9 @@ Two surfaces, same machinery underneath:
 """
 
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, Optional, Sequence, Union
 
+import numpy as np
 import pandas as pd
 
 from rnamelt import analysis_melting
@@ -103,6 +104,66 @@ class MeltAnalysis:
     def from_csv(cls, path: Union[str, Path], **kwargs) -> "MeltAnalysis":
         """Read CSV, run `cleaning.clean`, return a fresh analyzer."""
         return cls(clean(pd.read_csv(path)), **kwargs)
+
+    @classmethod
+    def from_arrays(
+        cls,
+        temperature,
+        signals,
+        *,
+        names: Optional[Sequence[str]] = None,
+        **kwargs,
+    ) -> "MeltAnalysis":
+        """Build an analyzer directly from temperature and signal arrays.
+
+        `temperature` is a 1D array-like in °C. `signals` may be:
+
+          * a 1D array-like — single signal column.
+          * a 2D array-like with shape ``(len(T), n_signals)`` — columns
+            named via `names` (default ``signal_1``, ``signal_2``, ...).
+          * a mapping ``{column_name: 1D array-like}`` — `names` is
+            ignored in this form.
+
+        All signal arrays must match the temperature length. Other
+        keyword arguments are forwarded to ``__init__``.
+        """
+        T = np.asarray(temperature, dtype=float).ravel()
+        n = T.size
+
+        if isinstance(signals, Mapping):
+            cols: dict[str, np.ndarray] = {}
+            for k, v in signals.items():
+                arr = np.asarray(v, dtype=float).ravel()
+                if arr.size != n:
+                    raise ValueError(
+                        f"signal {k!r} has length {arr.size}, expected {n}"
+                    )
+                cols[str(k)] = arr
+        else:
+            arr = np.asarray(signals, dtype=float)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            elif arr.ndim != 2:
+                raise ValueError(
+                    f"signals must be 1D or 2D; got ndim={arr.ndim}"
+                )
+            if arr.shape[0] != n:
+                raise ValueError(
+                    f"signals has {arr.shape[0]} rows, expected {n}"
+                )
+            if names is None:
+                col_names = [f"signal_{i + 1}" for i in range(arr.shape[1])]
+            else:
+                col_names = [str(s) for s in names]
+                if len(col_names) != arr.shape[1]:
+                    raise ValueError(
+                        f"names length {len(col_names)} != number of signal "
+                        f"columns {arr.shape[1]}"
+                    )
+            cols = {name: arr[:, i] for i, name in enumerate(col_names)}
+
+        df = pd.DataFrame({"temperature": T, **cols})
+        return cls(clean(df), **kwargs)
 
     def configure(self, **overrides) -> "MeltAnalysis":
         """Set one or more configuration knobs in place; return self for chaining.

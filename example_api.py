@@ -19,10 +19,16 @@ CSV_PATH = "debug_data.csv"
 
 # ── 1. Build the analyzer ─────────────────────────────────────────────────
 #
-# Two equivalent ways to load + clean the CSV:
+# Three equivalent constructors:
 #
-#   (a) MeltAnalysis.from_csv(path, **knobs)              — does the read+clean
-#   (b) MeltAnalysis(clean(pd.read_csv(path)), **knobs)   — you do it yourself
+#   (a) MeltAnalysis.from_csv(path, **knobs)                     — read + clean a CSV
+#   (b) MeltAnalysis.from_arrays(T, signals, **knobs)            — pass arrays directly
+#   (c) MeltAnalysis(clean(pd.read_csv(path)), **knobs)          — DIY DataFrame
+#
+# `from_arrays` accepts `signals` as a 1D array (single column), a 2D
+# array (one column per signal, optional `names=`), or a mapping
+# {column_name: 1D array}. Useful when temperature + signal already live
+# in numpy arrays — no CSV round-trip needed. See section 1b below.
 #
 # Every keyword shown below is optional except `df`. Defaults match the
 # in-browser pipeline. `None` means "let the orchestrator decide".
@@ -85,6 +91,41 @@ m.configure(salt=1000.0).configure(bl_lower_offset=8.0, bl_upper_offset=8.0)
 
 # Independent copy if you want to fork the analyzer without affecting `m`.
 m2 = m.copy()
+
+
+# ── 1b. Building from raw arrays (no CSV) ────────────────────────────────
+#
+# Pull temperature + signals out of any in-memory source (numpy arrays,
+# pandas Series, lists, an HDF5 read, an instrument SDK, ...) and hand
+# them to `from_arrays`. All structural / solver / vH knobs from above
+# are forwarded as kwargs.
+
+import numpy as np
+import pandas as pd
+
+_raw = pd.read_csv(CSV_PATH)
+T_arr      = _raw.iloc[:, 0].to_numpy()
+signal_F4  = _raw["F4"].to_numpy()
+
+# (i) Single signal as a 1D array — auto-named "signal_1".
+m_1d = MeltAnalysis.from_arrays(T_arr, signal_F4, struct_type="heterodimer")
+print(f"[arrays] 1D   columns={m_1d.signal_columns}  "
+      f"Tm={m_1d.single('signal_1', oligo=0.5).fit.Tm:.2f} °C")
+
+# (ii) Mapping {name: 1D array} — names preserved.
+m_dict = MeltAnalysis.from_arrays(
+    T_arr,
+    {col: _raw[col].to_numpy() for col in ("F4", "F5", "F6")},
+)
+print(f"[arrays] dict columns={m_dict.signal_columns}  "
+      f"Tm[F4]={m_dict.single('F4', oligo=0.5).fit.Tm:.2f} °C")
+
+# (iii) 2D array (rows=T, cols=signals) with explicit names.
+arr2d = _raw[["F4", "F5", "F6"]].to_numpy()
+m_2d = MeltAnalysis.from_arrays(T_arr, arr2d, names=["A", "B", "C"])
+print(f"[arrays] 2D   columns={m_2d.signal_columns}  "
+      f"Tm[A]={m_2d.single('A', oligo=0.5).fit.Tm:.2f} °C")
+print()
 
 
 # ── 2. Single-column mode ─────────────────────────────────────────────────
