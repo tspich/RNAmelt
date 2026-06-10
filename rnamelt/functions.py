@@ -3,8 +3,7 @@ from functools import reduce
 import numpy as np
 from scipy.optimize import least_squares
 
-#import constants
-from analysis import constants
+from rnamelt import constants
 
 def res_diff(vs):
     return vs[0] - vs[1]
@@ -143,15 +142,12 @@ def full_function_multi_res(x, T, ys, **kwargs):
 def theta_from_therm(T, dH, dS, c0 = 1e-6):
     tt    = T - constants.T0
     dG    = dH - tt * dS
-#    term  = np.sqrt(c0) * np.exp(-0.5 * dG / (constants.R * tt))
-#    return term / (np.sqrt(2) + term)
     term = np.sqrt(2 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
     return (term - 1) / (term + 1)
 
 def theta_from_therm_homo(T, dH, dS, c0 = 1e-6):
     tt    = T - constants.T0
     dG    = dH - tt * dS
-    #term = (4*c0*np.exp(- dG / (constants.R * tt))+np.sqrt(8*c0*np.exp(- dG / (constants.R * tt))+1)+1)/(4*c0*np.exp(- dG / (constants.R * tt)))
     term = np.sqrt(8 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
     return (term - 1) / (term + 1)
 

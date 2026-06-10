@@ -148,16 +148,6 @@ tailwind.config = {
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Experiment</div>
 
-<!--
-    <div class="mb-3">
-      <div class="text-xs font-medium mb-1.5">Signal type</div>
-      <div class="flex gap-1.5">
-        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigAbs" value="absorbance"><label for="sigAbs">Absorbance</label></div>
-        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigFlu" value="fluorescence" checked><label for="sigFlu">Fluorescence</label></div>
-      </div>
-    </div>
--->
-
     <div class="mb-3">
       <div class="text-xs font-medium mb-1.5">Structure type</div>
       <div class="flex gap-1.5">
@@ -241,22 +231,6 @@ tailwind.config = {
       Upper bl: T &gt; T<sub>high</sub> + offset
     </div>
   </div>
-
-  <!-- ⑤ Fix baselines toggle -->
-  <!--<div class="px-5 py-4 border-b border-border">
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-xs font-medium">Fix baselines during fit</div>
-        <div class="text-xs font-mono text-muted mt-0.5">Only ΔH and T<sub>m</sub> are free parameters</div>
-      </div>
-      <label class="toggle-wrap ml-3">
-        <input type="checkbox" id="fixBaselines">
-        <span class="toggle-track"></span>
-        <span class="toggle-thumb"></span>
-      </label>
-    </div>
-  </div>
-  -->
 
   <!-- ⑥ Run / Auto / Reset -->
   <div class="px-5 py-4 border-b border-border">
@@ -451,15 +425,15 @@ tailwind.config = {
 
 <script>
 const PYTHON_MODULES = [
-  { path: 'analysis/__init__.py' },
-  { path: 'analysis/methods.py' },
-  { path: 'analysis/functions.py' },
-  { path: 'analysis/constants.py' },
-  { path: 'analysis/util.py' },
-  { path: 'analysis/utils.py' },
-  { path: 'analysis/cleaning.py' },
-  { path: 'analysis/analysis_melting.py' },
-  { path: 'analysis/api.py' },
+  { path: 'rnamelt/__init__.py' },
+  { path: 'rnamelt/methods.py' },
+  { path: 'rnamelt/functions.py' },
+  { path: 'rnamelt/constants.py' },
+  { path: 'rnamelt/utils.py' },
+  { path: 'rnamelt/results.py' },
+  { path: 'rnamelt/cleaning.py' },
+  { path: 'rnamelt/analysis_melting.py' },
+  { path: 'rnamelt/api.py' },
 ];
 
 let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
@@ -480,7 +454,7 @@ async function boot() {
     setStatus('loading','Installing packages…');
     await pyodide.loadPackage(['pandas','numpy','scipy']);
     setStatus('loading','Loading modules…');
-    pyodide.FS.mkdir('/analysis');
+    pyodide.FS.mkdir('/rnamelt');
     for (const mod of PYTHON_MODULES) {
       const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`Cannot fetch ${mod.path} — serve via: python -m http.server`);
@@ -516,11 +490,11 @@ async function loadFile(file) {
   try {
     await pyodide.runPythonAsync(`
 import io, importlib, pandas as pd
-import analysis.cleaning as _cl; importlib.reload(_cl)
+import rnamelt.cleaning as _cl; importlib.reload(_cl)
 _df_global = _cl.clean(pd.read_csv(io.StringIO(csv_text_raw)))
 `);
     const info = JSON.parse(await pyodide.runPythonAsync(`
-import json; from analysis.cleaning import get_signal_columns
+import json; from rnamelt.cleaning import get_signal_columns
 _sig = get_signal_columns(_df_global)
 json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
   'T_min':float(_df_global['temperature'].min()),'T_max':float(_df_global['temperature'].max()),
@@ -630,10 +604,10 @@ async function runAnalysis() {
     pyodide.globals.set('_params_json', JSON.stringify(params));
     const raw = await pyodide.runPythonAsync(`
 import json, importlib
-import analysis.utils, analysis.methods, analysis.functions, analysis.cleaning
-importlib.reload(analysis.utils); importlib.reload(analysis.functions)
-importlib.reload(analysis.methods); importlib.reload(analysis.cleaning)
-import analysis.analysis_melting as _am; importlib.reload(_am)
+import rnamelt.utils, rnamelt.methods, rnamelt.functions, rnamelt.cleaning
+importlib.reload(rnamelt.utils); importlib.reload(rnamelt.functions)
+importlib.reload(rnamelt.methods); importlib.reload(rnamelt.cleaning)
+import rnamelt.analysis_melting as _am; importlib.reload(_am)
 _params = json.loads(_params_json)
 json.dumps(_am.run(_df_global, _params))
 `);
@@ -684,10 +658,14 @@ function renderResults(r) {
   if (blSrc) {
     const n = r.T_used.length, q = Math.floor(n / 4);
     const [m1,b1] = blSrc.b, [m2,b2] = blSrc.ub;
-    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    // order:-2 keeps baselines above the raw curve (order:0) and the fit (order:-1);
+    // without this, the thick raw line hides the folded baseline.
+    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
     meltSets.push(
-      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:'#aaa', ...blOpts},
-      {label:'Unfolded bl.', data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#aaa', ...blOpts},
+      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})),
+        borderColor:'#555', ...blOpts},
+      {label:'Unfolded bl.',
+        data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#555', ...blOpts},
     );
   }
   if (fit?.success && Array.isArray(fit.fit) && fit.fit.length) {
@@ -809,7 +787,8 @@ function renderMultiResults(r) {
     });
     const [m1,b1] = c.base_b_f, [m2,b2] = c.base_ub_f;
     const n = r.T_used.length, q = Math.floor(n / 4);
-    const blOpts = {borderWidth:1.5, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    // order:-2 — see chartMelt single-mode comment.
+    const blOpts = {borderWidth:1.5, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
     meltSets.push(
       {label:`${c.name} folded bl.`, data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:color, ...blOpts},
       {label:`${c.name} unfolded bl.`, data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:color, ...blOpts},

@@ -14,7 +14,7 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from analysis import analysis_melting, functions, constants
+from rnamelt import analysis_melting, functions, constants
 
 
 def _expected_tm_kelvin(dH: float, dS: float, ct: float, f: float) -> float:

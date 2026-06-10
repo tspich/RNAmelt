@@ -108,7 +108,10 @@ tailwind.config = {
         <a class="toc-link indent" href="#cli-examples">Examples</a>
         <a class="toc-link indent" href="#cli-flags">Flags</a>
         <a class="toc-link" href="#api">3. Python API</a>
-        <a class="toc-link indent" href="#api-functions">Functions</a>
+        <a class="toc-link indent" href="#api-class">MeltAnalysis class</a>
+        <a class="toc-link indent" href="#api-arrays">From raw arrays</a>
+        <a class="toc-link indent" href="#api-plotting">Plotting</a>
+        <a class="toc-link indent" href="#api-functions">Functional helpers</a>
         <a class="toc-link indent" href="#api-result">Result shape</a>
         <a class="toc-link" href="#model">Two-state model</a>
       </div>
@@ -186,28 +189,28 @@ tailwind.config = {
 
         <h3 id="cli-run">Running</h3>
         <p>From the project root, with <code>pandas</code>, <code>numpy</code>, and <code>scipy</code> available:</p>
-<pre><code>python -m analysis FILE.csv [options]</code></pre>
-        <p><code>python -m analysis --help</code> lists every flag. Exit codes: <code>0</code> on success, <code>1</code> if the analysis returns an error, <code>2</code> on bad input.</p>
+<pre><code>python -m rnamelt FILE.csv [options]</code></pre>
+        <p>Installing the package (<code>pip install .</code>) also wires up a console-script alias so you can just run <code>rnamelt FILE.csv</code>. <code>python -m rnamelt --help</code> lists every flag. Exit codes: <code>0</code> on success, <code>1</code> if the analysis returns an error, <code>2</code> on bad input.</p>
 
         <h3 id="cli-examples">Examples</h3>
         <p>Default — van't Hoff + full fit on every signal column in the file:</p>
-<pre><code>python -m analysis melt.csv --csv-out batch.csv</code></pre>
+<pre><code>python -m rnamelt melt.csv --csv-out batch.csv</code></pre>
 
         <p>Single column:</p>
-<pre><code>python -m analysis melt.csv \
+<pre><code>python -m rnamelt melt.csv \
   --column sample_1 --struct-type heterodimer \
   --oligo 5.0 --T-low 20 --T-high 90 \
   --csv-out single.csv</code></pre>
 
         <p>Shared-ΔH fit across columns (defaults to all columns at <code>--oligo</code> when <code>--oligo-multi</code> is omitted):</p>
-<pre><code>python -m analysis melt.csv \
+<pre><code>python -m rnamelt melt.csv \
   --column __multi__ --struct-type heterodimer \
   --oligo-multi sample_1=0.5 \
   --oligo-multi sample_2=5.0 \
   --oligo-multi sample_3=50</code></pre>
 
         <p>Concentration-series van't Hoff (requires <code>--oligo-multi</code> &mdash; varying C<sub>T</sub> is the whole point):</p>
-<pre><code>python -m analysis melt.csv \
+<pre><code>python -m rnamelt melt.csv \
   --column __concentration__ --struct-type heterodimer \
   --oligo-multi sample_1=0.5 \
   --oligo-multi sample_2=5.0 \
@@ -231,61 +234,144 @@ tailwind.config = {
             <tr><td><code>--indent</code></td><td><code>2</code></td><td>JSON indent (<code>0</code> = compact)</td></tr>
           </tbody>
         </table>
+
+        <p class="mt-3">Three solver-tuning groups override the in-browser defaults (<code>rnamelt.SOLVER_DEFAULTS</code>, <code>VH_DEFAULTS</code>, <code>FIT_INIT_DEFAULTS</code>). Pass any subset; unset flags fall back to defaults.</p>
+        <table>
+          <thead><tr><th>Group</th><th>Flags</th></tr></thead>
+          <tbody>
+            <tr><td><code>scipy.optimize.least_squares</code></td><td><code>--max-nfev</code>, <code>--ftol</code>, <code>--gtol</code>, <code>--xtol</code>, <code>--method</code>, <code>--loss</code>, <code>--f-scale</code>, <code>--jac</code>, <code>--solver-verbose</code>, <code>--residuals-method</code></td></tr>
+            <tr><td>van't Hoff linearisation</td><td><code>--vh-border</code>, <code>--vh-t1-min</code>, <code>--vh-t1-max</code>, <code>--vh-T-scale</code></td></tr>
+            <tr><td>full-fit initial guesses</td><td><code>--dH-init</code>, <code>--dS-init</code>, <code>--lin-init</code></td></tr>
+          </tbody>
+        </table>
       </section>
 
       <!-- ──────────────── PYTHON API ──────────────── -->
       <section id="api">
         <h2>3. Python API</h2>
-        <p>For notebooks or larger pipelines, three mode-specific functions wrap the same orchestrator the CLI uses. Each takes a cleaned <code>pandas.DataFrame</code> and returns a plain dict.</p>
+        <p>Install from source:</p>
+<pre><code>pip install .                # base — pandas / numpy / scipy
+pip install '.[plots]'       # also pulls matplotlib for .plot() helpers</code></pre>
+        <p>The recommended surface is the <code>MeltAnalysis</code> class. It holds the DataFrame plus every solver / van't Hoff / fit-init knob, and exposes the three modes as methods that return typed result objects from <code>rnamelt.results</code>. The thin functional wrappers (<code>analyze_single</code>, …) are kept for back-compat and also documented below.</p>
 
-        <h3 id="api-functions">Functions</h3>
+        <h3 id="api-class">MeltAnalysis class</h3>
+<pre><code>from rnamelt import MeltAnalysis, FitFailed
+
+m = MeltAnalysis.from_csv(
+    "melt.csv",
+    struct_type="heterodimer",   # "heterodimer" | "homodimer" | "monomer"
+    salt=150.0,                  # NaCl (mM) — metadata only
+    T_low=None, T_high=None,     # transition window (°C); None = full range
+    bl_lower_offset=10.0,        # folded-baseline span above T_low (°C)
+    bl_upper_offset=10.0,        # unfolded-baseline span below T_high (°C)
+    solver=None,                 # dict — overrides rnamelt.SOLVER_DEFAULTS
+    vh=None,                     # dict — overrides rnamelt.VH_DEFAULTS
+    fit_init=None,               # dict — overrides rnamelt.FIT_INIT_DEFAULTS
+)
+
+print(m.signal_columns)          # ['F4', 'F5', ...]
+m.configure(salt=1000.0)         # chainable in-place reconfiguration
+m2 = m.copy()                    # independent fork</code></pre>
+
+        <p><strong>Single column</strong> — returns a <code>SingleResult</code>:</p>
+<pre><code>r = m.single("F4", oligo=0.5)    # oligo in µM
+r.Tm_raw, r.vh.dH, r.fit.Tm, r.fit.dG
+len(r.fit.curve)                 # numpy arrays live on the result
+
+try:
+    r.fit.require()              # raises FitFailed if not r.fit.ok
+except FitFailed as e:
+    print(e)
+
+r.to_dict()       # legacy orchestrator dict (browser-shape)
+r.to_dataframe()  # 1-row tidy summary
+r.to_csv("out.csv")</code></pre>
+
+        <p><strong>Shared-ΔH multi fit</strong> — returns a <code>MultiResult</code>:</p>
+<pre><code>oligo_multi = {"F4": 0.5, "F5": 1.0, "F6": 2.0, "F7": 4.0}
+multi = m.multi(oligo_multi)
+multi.dH, multi.dS, multi.dG     # shared ΔH/ΔS/ΔG
+for c in multi.columns:
+    print(c.name, c.Tm_fit, c.oligoC)</code></pre>
+
+        <p><strong>Concentration-series van't Hoff</strong> — returns a <code>ConcentrationResult</code> with three regressions:</p>
+<pre><code>conc = m.concentration(oligo_multi)
+for s in (conc.series_raw, conc.series_vh, conc.series_fit):
+    if s.ok:
+        print(s.dH, s.dG_37, s.r_squared)
+conc.per_curve, conc.skipped</code></pre>
+
+        <p><strong>Every column at once</strong>:</p>
+<pre><code>batch = m.single_all(oligo=0.5)  # dict[str, SingleResult]
+{name: r.fit.Tm for name, r in batch.items() if r.fit and r.fit.ok}</code></pre>
+
+        <h3 id="api-arrays">From raw arrays — no CSV</h3>
+        <p><code>MeltAnalysis.from_arrays</code> bypasses the CSV layer. <code>signals</code> accepts three shapes:</p>
+<pre><code>import numpy as np
+from rnamelt import MeltAnalysis
+
+T = np.linspace(20, 90, 71)
+
+# (1) 1D array — single column, auto-named "signal_1"
+m = MeltAnalysis.from_arrays(T, signal_F4)
+
+# (2) Mapping {name: 1D array} — names preserved
+m = MeltAnalysis.from_arrays(T, {"F4": sigF4, "F5": sigF5})
+
+# (3) 2D array (rows=T, cols=signals), optional `names=`
+m = MeltAnalysis.from_arrays(T, arr2d, names=["A", "B", "C"])</code></pre>
+        <p>All signal arrays must match the temperature length. Other keyword arguments forward to <code>MeltAnalysis.__init__</code>.</p>
+
+        <h3 id="api-plotting">Plotting <span class="text-muted text-sm">(optional — needs matplotlib)</span></h3>
+        <p>Each result class has a <code>.plot()</code> method that lazy-imports <code>rnamelt.plots</code> (matplotlib stays out of the base install so the browser bundle is unaffected).</p>
+<pre><code>import matplotlib
+matplotlib.use("Agg")                    # headless backend
+import matplotlib.pyplot as plt
+
+# SingleResult — 3-panel: raw + baselines / van't Hoff / full fit
+fig, axes = m.single("F4").plot(figsize=(15, 5))
+fig.savefig("single.png", dpi=120); plt.close(fig)
+
+# Convenience shortcut on the analyzer
+fig, axes, result = m.plot("F4")         # single(column).plot()
+
+# MultiResult — all column curves + shared-ΔH fits on one axis
+fig, ax = m.multi(oligo_multi).plot(figsize=(10, 6))
+
+# ConcentrationResult — overlay + 1/Tm vs ln(C_T/f)
+fig, axes = m.concentration(oligo_multi).plot(figsize=(13, 5))</code></pre>
+
+        <h3 id="api-functions">Functional helpers</h3>
+        <p>Thin wrappers kept for backwards compatibility. Each takes a cleaned <code>pandas.DataFrame</code> and returns the legacy dict.</p>
 <pre><code>import pandas as pd
-from analysis import (
+from rnamelt import (
     analyze_single, analyze_multi, analyze_concentration, analyze_csv,
 )
-from analysis.cleaning import clean
+from rnamelt.cleaning import clean
 
-df = clean(pd.read_csv("melt.csv"))</code></pre>
+df = clean(pd.read_csv("melt.csv"))
 
-        <p><strong>Single column</strong></p>
-<pre><code>r = analyze_single(
-    df, "sample_1",
-    struct_type="heterodimer", oligo=0.5,
-    T_low=20, T_high=90,
-)
-print(r["TmRaw"], r["fit_result"]["dH"])</code></pre>
+analyze_single(df, "sample_1", struct_type="heterodimer", oligo=0.5)
+analyze_multi(df, {"sample_1": 0.5, "sample_2": 5.0})
+analyze_concentration(df, {"sample_1": 0.5, "sample_2": 5.0})
 
-        <p><strong>Shared-ΔH multi fit</strong></p>
-<pre><code>r = analyze_multi(
-    df,
-    {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
-    struct_type="heterodimer",
-)</code></pre>
-
-        <p><strong>Concentration-series van't Hoff</strong> — returns three regressions (raw / vH / full fit):</p>
-<pre><code>r = analyze_concentration(
-    df,
-    {"sample_1": 0.5, "sample_2": 5.0, "sample_3": 50.0},
-    struct_type="heterodimer",
-)
-for key in ("raw", "vh", "fit"):
-    s = r["series"][key]
-    print(key, s["dH"], s["r_squared"])</code></pre>
-
-        <p><strong>One-liner from a CSV path</strong> — wraps <code>read_csv</code> + <code>clean</code> + dispatch:</p>
-<pre><code>analyze_csv("melt.csv", mode="single", column="sample_1", oligo=0.5)
+# read_csv + clean + dispatch in one call
+analyze_csv("melt.csv", mode="single", column="sample_1", oligo=0.5)
 analyze_csv("melt.csv", mode="concentration",
             oligo_multi={"sample_1": 0.5, "sample_2": 5.0})</code></pre>
 
         <h3 id="api-result">Result dict shape</h3>
-        <p><strong>Single column</strong>:</p>
+        <p><code>SingleResult.to_dict()</code> (and <code>analyze_single</code>) return the same dict the in-browser pipeline produces:</p>
 <pre><code>{
   "name": "sample_1",
   "TmRaw": 52.5,
-  "vantHoff":   {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_vH": ...},
+  "vantHoff":   {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_vH": ...,
+                 "fit_vh": (slope, intercept), ...},
   "fit_result": {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_fit": ...,
-                 "fit": [...], "derivative": [...]},
+                 "fit": [...], "derivative": [...],
+                 "base_b_f": (m, b), "base_ub_f": (m, b)},
   "T_used": [...], "signal": [...],
+  "base_b_r": (m, b), "base_ub_r": (m, b),
   ...
 }</code></pre>
 
@@ -305,7 +391,7 @@ analyze_csv("melt.csv", mode="concentration",
   },
   "skipped": [{"name": ..., "reason": ...}, ...],
 }</code></pre>
-        <p>ΔH is in kcal/mol, ΔS in kcal/(mol·K), Tm in °C (Kelvin variants suffixed <code>_K</code>).</p>
+        <p>ΔH is in kcal/mol, ΔS in kcal/(mol·K), Tm in °C (Kelvin variants suffixed <code>_K</code>). The typed result objects (<code>SingleResult</code>, <code>MultiResult</code>, <code>ConcentrationResult</code>, …) live in <code>rnamelt.results</code> and expose the same fields as attributes — numpy arrays stay as numpy arrays instead of being JSON-flattened.</p>
       </section>
 
       <!-- ──────────────── MODEL ──────────────── -->
