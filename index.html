@@ -148,16 +148,6 @@ tailwind.config = {
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Experiment</div>
 
-<!--
-    <div class="mb-3">
-      <div class="text-xs font-medium mb-1.5">Signal type</div>
-      <div class="flex gap-1.5">
-        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigAbs" value="absorbance"><label for="sigAbs">Absorbance</label></div>
-        <div class="radio-pill flex-1"><input type="radio" name="signalType" id="sigFlu" value="fluorescence" checked><label for="sigFlu">Fluorescence</label></div>
-      </div>
-    </div>
--->
-
     <div class="mb-3">
       <div class="text-xs font-medium mb-1.5">Structure type</div>
       <div class="flex gap-1.5">
@@ -241,22 +231,6 @@ tailwind.config = {
       Upper bl: T &gt; T<sub>high</sub> + offset
     </div>
   </div>
-
-  <!-- ⑤ Fix baselines toggle -->
-  <!--<div class="px-5 py-4 border-b border-border">
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-xs font-medium">Fix baselines during fit</div>
-        <div class="text-xs font-mono text-muted mt-0.5">Only ΔH and T<sub>m</sub> are free parameters</div>
-      </div>
-      <label class="toggle-wrap ml-3">
-        <input type="checkbox" id="fixBaselines">
-        <span class="toggle-track"></span>
-        <span class="toggle-thumb"></span>
-      </label>
-    </div>
-  </div>
-  -->
 
   <!-- ⑥ Run / Auto / Reset -->
   <div class="px-5 py-4 border-b border-border">
@@ -455,8 +429,8 @@ const PYTHON_MODULES = [
   { path: 'rnamelt/methods.py' },
   { path: 'rnamelt/functions.py' },
   { path: 'rnamelt/constants.py' },
-  { path: 'rnamelt/util.py' },
   { path: 'rnamelt/utils.py' },
+  { path: 'rnamelt/results.py' },
   { path: 'rnamelt/cleaning.py' },
   { path: 'rnamelt/analysis_melting.py' },
   { path: 'rnamelt/api.py' },
@@ -684,10 +658,14 @@ function renderResults(r) {
   if (blSrc) {
     const n = r.T_used.length, q = Math.floor(n / 4);
     const [m1,b1] = blSrc.b, [m2,b2] = blSrc.ub;
-    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    // order:-2 keeps baselines above the raw curve (order:0) and the fit (order:-1);
+    // without this, the thick raw line hides the folded baseline.
+    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
     meltSets.push(
-      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:'#aaa', ...blOpts},
-      {label:'Unfolded bl.', data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#aaa', ...blOpts},
+      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})),
+        borderColor:'#555', ...blOpts},
+      {label:'Unfolded bl.',
+        data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#555', ...blOpts},
     );
   }
   if (fit?.success && Array.isArray(fit.fit) && fit.fit.length) {
@@ -809,7 +787,8 @@ function renderMultiResults(r) {
     });
     const [m1,b1] = c.base_b_f, [m2,b2] = c.base_ub_f;
     const n = r.T_used.length, q = Math.floor(n / 4);
-    const blOpts = {borderWidth:1.5, borderDash:[4,3], pointRadius:0, showLine:true, tension:0};
+    // order:-2 — see chartMelt single-mode comment.
+    const blOpts = {borderWidth:1.5, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
     meltSets.push(
       {label:`${c.name} folded bl.`, data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})), borderColor:color, ...blOpts},
       {label:`${c.name} unfolded bl.`, data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:color, ...blOpts},
