@@ -13,16 +13,7 @@ authors = [
     { name = "tspich" },
     { name = "RaumZeit" },
 ]
-keywords = ["rna", "dna", "melting curve", "thermodynamics", "van't hoff", "biophysics"]
-classifiers = [
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
-    "Topic :: Scientific/Engineering :: Chemistry",
-]
+keywords = ["rna", "melting curve", "thermodynamics"]
 dependencies = [
     "numpy>=1.23",
     "pandas>=1.5",
