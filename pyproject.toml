@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "RNAmelt contributors" },
+    { name = "tspich" },
+    { name = "RaumZeit" },
 ]
 keywords = ["rna", "dna", "melting curve", "thermodynamics", "van't hoff", "biophysics"]
 classifiers = [
