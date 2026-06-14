@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rnamelt"
-version = "0.1.0"
+version = "0.1.1"
 description = "Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of RNA melting curves"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,20 @@ authors = [
     { name = "RaumZeit" },
 ]
 keywords = ["rna", "melting curve", "thermodynamics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "numpy>=1.23",
     "pandas>=1.5",
