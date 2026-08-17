@@ -85,7 +85,7 @@ def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, structType='heterodimer'
 def full_function_res(x, T, y, c0 = 1e-6, structType = 'heterodimer'):
     return y - full_function(T, *x, c0, structType)
 
-def full_function_multi(T, *args, **kwargs):
+def full_function_multi(temps, *args, **kwargs):
     default_c0 = 1e-6
     default_structType = 'hetero'
     # prepare variables and constants
@@ -119,17 +119,17 @@ def full_function_multi(T, *args, **kwargs):
     # compose result function fit
     for i, c in enumerate(cs):
         if structType == 'heterodimer':
-            theta = theta_from_therm(T, dH, dS, c)
+            theta = theta_from_therm(temps[i], dH, dS, c)
         elif structType == 'homodimer':
-            theta = theta_from_therm_homo(T, dH, dS, c)
+            theta = theta_from_therm_homo(temps[i], dH, dS, c)
         elif structType == 'monomer':
-            theta = theta_from_therm_mono(T, dH, dS, c)
+            theta = theta_from_therm_mono(temps[i], dH, dS, c)
 
-        f.append(theta * (m1s[i] * T + b1s[i]) + (1 - theta) * (m2s[i] * T + b2s[i]))
+        f.append(theta * (m1s[i] * temps[i] + b1s[i]) + (1 - theta) * (m2s[i] * temps[i] + b2s[i]))
 
     return f
 
-def full_function_multi_res(x, T, ys, **kwargs):
+def full_function_multi_res(x, temps, ys, **kwargs):
     # set residual function, default to simple differences
     res_func = kwargs.get('res_func', res_diff)
 
@@ -137,7 +137,7 @@ def full_function_multi_res(x, T, ys, **kwargs):
         res_func = res_diff
 
     # compute and return actual sum of residuals
-    return reduce(lambda x, y: x + y, map(res_func, zip(ys, full_function_multi(T, x, **kwargs))))
+    return reduce(lambda x, y: x + y, map(res_func, zip(ys, full_function_multi(temps, x, **kwargs))))
 
 def theta_from_therm(T, dH, dS, c0 = 1e-6):
     tt    = T - constants.T0

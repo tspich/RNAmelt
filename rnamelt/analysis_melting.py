@@ -31,7 +31,7 @@ from rnamelt import methods, functions, constants
 
 # ─── Main entry point ────────────────────────────────────────────────────────
 
-def run(df, params: dict):# -> dict:
+def run(signal, temps, params: dict):# -> dict:
     """
     params keys (all optional — sensible defaults applied):
         T_low         (float, °C)   lower boundary of transition window
@@ -42,36 +42,22 @@ def run(df, params: dict):# -> dict:
         CT            (float, M)    strand concentration for 1/Tm vs ln[CT]
         column        (str)         which signal column to fit
     """
-    from rnamelt.cleaning import get_signal_columns
 
-    T_all      = df["temperature"].values.astype(float)
-    sig_cols   = get_signal_columns(df)
-
-    if not sig_cols:
+    if not signal:
         return {"name": "Melting Analysis", "error": "No signal columns found."}
 
-    col = params.get("column", sig_cols[0])
+    col = params.get("column", "")
     if col in ('multi', '__multi__'):
-        return _run_multi(df, params, T_all, sig_cols)
+        return _run_multi(params, temps, signal)
     elif col in ('concentration', '__concentration__'):
-        return _run_concentration(df, params, T_all, sig_cols)
+        return _run_concentration(params, temps, signal)
     else:
-        if col not in df.columns:
-            col = sig_cols[0]
-
-        signal_all = df[col].values.astype(float)
-
         # Remove NaNs
-        valid = ~np.isnan(signal_all)
-        T_all      = T_all[valid]
-        signal_all = signal_all[valid]
-
-        #if len(T_all) < 10:
-        #    return {"name": "Melting Analysis", "error": "Not enough data points."}
+        valid = ~np.isnan(signal)
+        T_all      = temps[valid]
+        signal_all = signal[valid]
 
         T_min, T_max = float(T_all.min()), float(T_all.max())
-
-        #print(params)
 
         T_low  = float(params.get("T_low",  T_min))
         T_high = float(params.get("T_high", T_max))
@@ -85,7 +71,6 @@ def run(df, params: dict):# -> dict:
         TT = T_all[pos_start:pos_end]
         used_data = signal_all[pos_start:pos_end]
 
-        ##signal_type = params.get("signal_type", "absorbance")
         struct_type = params.get("struct_type", "heterodimer")
         c0 = 1e-6 * oligo_concentration * constants.STRAND_STOICHIOMETRY[struct_type]
         base_b_offset = params.get("bl_lower_offset", 10)
@@ -212,34 +197,29 @@ def run(df, params: dict):# -> dict:
         return safe_json(thermo_properties)
 
 
-def _run_multi(df, params: dict, T_all, sig_cols):
+def _run_multi(params: dict, temps, signal):
     """Simultaneous fit across all signal columns sharing dH, dS; independent baselines."""
-    oligo_multi = params.get("oligo_multi") or {}
-    salt_c      = float(params.get("salt", 150))
+    oligo_multi = params.get("oligo_multi", [])
     struct_type = params.get("struct_type", "heterodimer")
     stoich      = constants.STRAND_STOICHIOMETRY[struct_type]
     solver      = params.get("solver")
     fit_init    = methods._fit_init_kwargs(params.get("fit_init"))
 
-    T_min, T_max = float(T_all.min()), float(T_all.max())
-    T_low  = float(params.get("T_low",  T_min))
-    T_high = float(params.get("T_high", T_max))
+    TT = []
+    ds = []
+    cs = []
 
-    pos_start = int(np.where(T_all == T_low)[0][0])
-    pos_end   = int(np.where(T_all == T_high)[0][0]) + 1
-    TT        = T_all[pos_start:pos_end]
+    for i, sig in enumerate(signal):
+        T_all = temps[i]
+        T_min, T_max = float(T_all.min()), float(T_all.max())
+        T_low  = float(params.get("T_low",  T_min))
+        T_high = float(params.get("T_high", T_max))
 
-    ds, cs, oligos, col_names, signals_all = [], [], [], [], []
-    for c in sig_cols:
-        sig = df[c].values.astype(float)
-        if np.isnan(sig).any():
-            continue
-        oligo = float(oligo_multi.get(c, 0.5))
+        pos_start = int(np.where(T_all == T_low)[0][0])
+        pos_end   = int(np.where(T_all == T_high)[0][0]) + 1
+        TT.append(T_all[pos_start:pos_end])
         ds.append(sig[pos_start:pos_end])
-        cs.append(1e-6 * oligo * stoich)
-        oligos.append(oligo)
-        col_names.append(c)
-        signals_all.append(sig)
+        cs.append(1e-6 * oligo_multi[i] * stoich)
 
     if len(ds) < 2:
         return {"name": "Melting Analysis", "error": "multi fit needs at least 2 valid columns"}
@@ -264,14 +244,14 @@ def _run_multi(df, params: dict, T_all, sig_cols):
         return {"name": "Melting Analysis", "error": f"multi fit failed: {e}"}
 
     columns = []
-    for i, name in enumerate(col_names):
+    for i, s in enumerate(signal):
         fit = np.array([
             functions.full_function(tt, dH, dS, *bl_lo[i], *bl_hi[i], c0=cs[i])
             for tt in TT
         ])
         columns.append({
-            "name":       name,
-            "oligoC":     oligos[i],
+            "id":         i+1,
+            "oligoC":     oligo_multi[i],
             "c0":         cs[i],
             "T_m_fit":    T_ms[i],
             "base_b_f":   bl_lo[i],
@@ -279,15 +259,13 @@ def _run_multi(df, params: dict, T_all, sig_cols):
             "base_med_f": bl_me[i],
             "fit":        fit,
             "signal":     ds[i],
-            "signal_all": signals_all[i],
+            "signal_all": s,
         })
 
     return safe_json({
         "name":       "multi",
         "is_multi":   True,
-        "saltC":      salt_c,
         "T_used":     TT,
-        "T_all":      T_all,
         "dG":         dG_37,
         "dH":         dH,
         "dS":         dS,
@@ -295,7 +273,7 @@ def _run_multi(df, params: dict, T_all, sig_cols):
     })
 
 
-def _run_concentration(df, params: dict, T_all, sig_cols):
+def _run_concentration(params: dict, temps, signal):
     """Concentration-series van't Hoff: extract Tm per column, regress 1/Tm vs ln(C_T/f)."""
     struct_type = params.get("struct_type", "heterodimer")
     if struct_type == "monomer":
@@ -305,8 +283,7 @@ def _run_concentration(df, params: dict, T_all, sig_cols):
         }
     self_comp = (struct_type == "homodimer")
 
-    oligo_multi = params.get("oligo_multi") or {}
-    salt_c      = float(params.get("salt", 150))
+    oligo_multi = params.get("oligo_multi", [])
     solver      = params.get("solver")
     vh_kwargs   = methods._vh_kwargs(params.get("vh"))
     fit_init    = methods._fit_init_kwargs(params.get("fit_init"))
