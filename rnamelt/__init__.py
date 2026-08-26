@@ -7,48 +7,25 @@ Public API:
 """
 
 from rnamelt.api import (
-    MeltAnalysis,
-    analyze_concentration,
-    analyze_csv,
-    analyze_multi,
-    analyze_single,
+    SingleCurve,
+    MultiCurves,
 )
 from rnamelt.methods import FIT_INIT_DEFAULTS, SOLVER_DEFAULTS, VH_DEFAULTS
 from rnamelt.results import (
-    BatchResult,
-    ConcentrationCurve,
-    ConcentrationResult,
-    ConcentrationSeries,
-    FitFailed,
-    FullFit,
-    MultiColumnResult,
-    MultiResult,
-    SingleResult,
     VanHoffFit,
+    RawTm,
 )
 
-ANALYSES = [
-    "rnamelt.analysis_melting",
-]
+#ANALYSES = [
+#    "rnamelt.analysis_melting",
+#]
 
 __all__ = [
-    "MeltAnalysis",
-    "analyze_single",
-    "analyze_multi",
-    "analyze_concentration",
-    "analyze_csv",
-    "SingleResult",
-    "MultiResult",
-    "MultiColumnResult",
-    "ConcentrationResult",
-    "ConcentrationCurve",
-    "ConcentrationSeries",
-    "BatchResult",
+    "RawTm",
     "VanHoffFit",
-    "FullFit",
-    "FitFailed",
+    "SingleCurve",
+    "MultiCurves",
     "SOLVER_DEFAULTS",
     "VH_DEFAULTS",
     "FIT_INIT_DEFAULTS",
-    "ANALYSES",
 ]

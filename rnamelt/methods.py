@@ -128,7 +128,7 @@ def T_m_ds_raw(temperatures,
                ydata,
                baseline_bound_minT = -1,
                baseline_bound_maxT = 20.0,
-               baseline_unbound_minT = 70,
+               baseline_unbound_minT = 70.0,
                baseline_unbound_maxT = -1,
                debug = False):
     T = np.array(temperatures)
@@ -345,7 +345,7 @@ def fit_full_function(
     T,
     d,
     c0=1e-6,
-    dH_init=-100,
+    dH_init=-100.,
     dS_init=-0.2,
     b1_init=None,
     b2_init=None,
@@ -401,7 +401,7 @@ def fit_full_function_multi(
     ds,
     cs=None,
     c0=1e-6,
-    dH_init=-100,
+    dH_init=-100.,
     dS_init=-0.2,
     b1_inits=None,
     b2_inits=None,
@@ -411,11 +411,13 @@ def fit_full_function_multi(
     solver=None,
 ):
 
-    xdata = np.array(T)
+    xdata = T #np.array(T)
     ydata = ds #np.array(d)
 
     # use the first and last lin_init data values
     # for initializing the linear intercepts of L_1 and L_2
+    print(len(xdata), len(ydata))
+
     if b1_inits == None:
       b1_inits = [ (0, sum(dd[0:lin_init]) / lin_init) for dd in ds ]
 
@@ -476,7 +478,7 @@ def fit_full_function_multi(
             m_b, b_b    = res_lsq.x[i], res_lsq.x[i + 1]
             m_ub, b_ub  = res_lsq.x[i + 2], res_lsq.x[i + 3]
             m_m, b_m    = (m_b + m_ub) / 2, (b_b + b_ub) / 2
-            T_m, y_dat  = functions.intersect_lin(m_m, b_m, xdata, ydata[j])
+            T_m, y_dat  = functions.intersect_lin(m_m, b_m, xdata[j], ydata[j])
             baselines_lo.append( (m_b, b_b) )
             baselines_hi.append( (m_ub, b_ub) )
             baselines_me.append( (m_m, b_m) )
