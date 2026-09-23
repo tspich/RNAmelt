@@ -11,16 +11,16 @@ from rnamelt import functions, constants
 # in-browser (Pyodide) case where ~10k function evaluations is the
 # practical ceiling; CLI / API users can raise via the `solver=` argument.
 SOLVER_DEFAULTS = {
-    "max_nfev":         10000,
+    "max_nfev":         1e12,
     "ftol":             1e-8,
     "gtol":             1e-8,
     "xtol":             1e-8,
     "method":           "trf",
     "loss":             "linear",
-    "f_scale":          1.0,
+    "f_scale":          0.02,
     "jac":              "2-point",
     "verbose":          0,
-    "residuals_method": "square",  # multi-fit only — see functions.res_diffs
+    #"residuals_method": "square",  # multi-fit only — see functions.res_diffs
 }
 
 # Subset of SOLVER_DEFAULTS that is forwarded as-is to least_squares().
@@ -206,7 +206,7 @@ def vantHoff(T,
 
         # compile actual data without None values
         for i in range(0, len(K)):
-            if K[i] != None:
+            if K[i] is not None:
                 tt.append(t1[i])
                 lnK.append(K[i])
 
@@ -230,7 +230,7 @@ def vantHoff(T,
         t_m = (np.log(4 / c0) - res_lsq.x[1]) / res_lsq.x[0]
         T_m = T_scale / t_m + constants.T0
         dH  = -res_lsq.x[0] * constants.R * T_scale
-        dG_Tm = constants.R * (T_m - constants.T0) * np.log(4 / c0) + dH
+        #dG_Tm = constants.R * (T_m - constants.T0) * np.log(4 / c0) + dH
 
         dS    = dH / (T_m - constants.T0) + constants.R * np.log(4 / c0)
         dG_37 = dH - (37. - constants.T0) * dS
@@ -250,7 +250,7 @@ def vantHoff(T,
 
         # compile actual data without None values
         for i in range(0, len(K)):
-            if K[i] != None:
+            if K[i] is not None:
                 tt.append(t1[i])
                 lnK.append(K[i])
 
@@ -274,7 +274,7 @@ def vantHoff(T,
         t_m = (np.log(1 / c0) - res_lsq.x[1]) / res_lsq.x[0]
         T_m = T_scale / t_m + constants.T0
         dH  = -res_lsq.x[0] * constants.R * T_scale
-        dG_Tm = constants.R * (T_m - constants.T0) * np.log(1 / c0) + dH
+        #dG_Tm = constants.R * (T_m - constants.T0) * np.log(1 / c0) + dH
 
         dS    = dH / (T_m - constants.T0) + constants.R * np.log(1 / c0)
         dG_37 = dH - (37. - constants.T0) * dS
@@ -284,6 +284,11 @@ def vantHoff(T,
 
     elif structType == 'monomer':
         raise ValueError("Van't Hoff analysis not possible for monomere!")
+    else:
+        raise ValueError(
+            f"unknown structType {structType!r}; "
+            f"valid: 'heterodimer', 'homodimer', 'monomer'"
+        )
 
 def vant_hoff_concentration(
     tm_values,
@@ -318,7 +323,12 @@ def vant_hoff_concentration(
             "1/Tm vs ln(C_T)"
         )
 
-    slope, intercept, r, _, _ = stats.linregress(ln_ct, inv_tm)
+    #slope, intercept, r, _, _ = stats.linregress(ln_ct, inv_tm)
+    reg = stats.linregress(ln_ct, inv_tm)
+    slope     = float(reg.slope)
+    intercept = float(reg.intercept)
+    r_value   = float(reg.rvalue)
+
 
     if slope == 0:
         raise ValueError("Regression slope is zero; cannot derive ΔH")
@@ -331,15 +341,116 @@ def vant_hoff_concentration(
         "dH":             float(dH),
         "dS":             float(dS),
         "dG_37":          float(dG_37),
-        "r_squared":      float(r ** 2),
-        "slope":          float(slope),
-        "intercept":      float(intercept),
+        "r_squared":      r_value ** 2,
+        "slope":          slope,
+        "intercept":      intercept,
         "ln_ct":          ln_ct,
         "inv_tm":         inv_tm,
         "tm_values":      tm,
         "concentrations": ct,
         "self_complementary": bool(self_complementary),
     }
+
+def _slope_cap(T, d, k=5.0):
+    """Baseline-slope magnitude cap: k× the naive whole-data slope amplitude.
+
+    Under a two-state model the folded/unfolded baselines are linear regions
+    of the signal; a fitted slope much larger than the overall
+    (F_max-F_min)/(T_max-T_min) implies the baseline is absorbing part of the
+    transition and is unphysical. k=5 leaves plenty of headroom for real
+    baseline drift while ruling out the pathological "baseline explains the
+    whole curve" minima that trap the solver at the initial dH seed.
+    """
+    span_T = float(T[-1] - T[0])
+    span_S = float(np.nanmax(d) - np.nanmin(d))
+    if span_T <= 0 or span_S <= 0:
+        return np.inf
+    return k * span_S / span_T
+
+
+def _fit_bounds(T, d, mode):
+    """Return (lo, hi) parameter bounds for [dH, dS, m1, b1, m2, b2].
+
+    Modes:
+      "loose"     : current default — m1 ≥ 0, everything else free
+      "unbounded" : all four baseline parameters free (-inf, inf)
+      "physical"  : |m1|, |m2| ≤ 5× (ΔS/ΔT); intercepts free
+      "positive"  : m1 ≥ 0, m2 ≥ 0; intercepts free
+    """
+    if mode == "loose":
+        return ([ -200., -5.,      0., -np.inf, -np.inf, -np.inf ],
+                [   0.,   0.,  np.inf,  np.inf,  np.inf,  np.inf ])
+    if mode == "unbounded":
+        return ([ -200., -5., -np.inf, -np.inf, -np.inf, -np.inf ],
+                [   0.,   0.,  np.inf,  np.inf,  np.inf,  np.inf ])
+    if mode == "positive":
+        return ([ -200., -5.,      0., -np.inf,      0., -np.inf ],
+                [   0.,   0.,  np.inf,  np.inf,  np.inf,  np.inf ])
+    if mode == "physical":
+        cap = _slope_cap(T, d, k=5.0)
+        return ([ -200., -5.,   -cap, -np.inf,   -cap, -np.inf ],
+                [   0.,   0.,    cap,  np.inf,    cap,  np.inf ])
+    raise ValueError(f"unknown bounds_mode {mode!r}; valid: "
+                     "'loose', 'unbounded', 'positive', 'physical'")
+
+
+def dH_seed_from_fwhm(T, S, struct_type="heterodimer", folding=True,
+                      smooth_window=21, smooth_polyorder=3):
+    """Estimate ΔH (kcal/mol) from the FWHM of dS/dT — no baseline required.
+
+    For a two-state transition centred at Tm, dθ/dT is peaked and the peak
+    FWHM is a fixed multiple of R·Tm²/|ΔH|. The formula
+    ``|ΔH| ≈ 3.526 R Tm² / FWHM``
+    applies to both mono- and bimolecular two-state melts. Returns None if a
+    peak cannot be located. ``folding=True`` returns a negative value
+    (RNAmelt's helix-formation sign convention).
+
+    A sloping baseline broadens the observed dS/dT peak, so this estimator
+    systematically UNDER-predicts |ΔH| by a factor typically 1.3–1.8. It is
+    intended as a robust starting point for the non-linear fit, not as a
+    final result.
+    """
+    from scipy.signal import savgol_filter
+    T = np.asarray(T, dtype=float); S = np.asarray(S, dtype=float)
+    n = len(T)
+    if n < 11:
+        return None
+    dt = float(np.median(np.diff(T)))
+    w = min(smooth_window, n if n % 2 else n - 1)
+    w = w if w % 2 else w - 1
+    p = min(smooth_polyorder, w - 1)
+    dS = savgol_filter(S, w, p, deriv=1) / dt
+
+    up = float(S[-max(3, n // 10):].mean()) > float(S[:max(3, n // 10)].mean())
+    if not up:
+        dS = -dS
+    ipk = int(np.argmax(dS))
+    peak = float(dS[ipk])
+    if peak <= 0:
+        return None
+
+    half = peak / 2.0
+    left, right = ipk, ipk
+    while left > 0 and dS[left] > half:
+        left -= 1
+    while right < n - 1 and dS[right] > half:
+        right += 1
+
+    def _cross(i0, i1):
+        y0, y1 = dS[i0], dS[i1]
+        return T[i0] if y0 == y1 else T[i0] + (half - y0) / (y1 - y0) * (T[i1] - T[i0])
+
+    T_lo = _cross(left, left + 1) if left + 1 <= ipk else T[left]
+    T_hi = _cross(right - 1, right) if right - 1 >= ipk else T[right]
+    fwhm = float(T_hi - T_lo)
+    if fwhm <= 0:
+        return None
+
+    Tm_K = float(T[ipk]) + 273.15
+    dH_mag = 3.526 * constants.R * Tm_K * Tm_K / fwhm
+    dH = -dH_mag if folding else dH_mag
+    return float(dH)
+
 
 def fit_full_function(
     T,
@@ -350,8 +461,8 @@ def fit_full_function(
     b1_init=None,
     b2_init=None,
     lin_init=10,
-    #max_v=np.inf,
     structType="heterodimer",
+    bounds_mode="loose",
     solver=None,
 ):
     xdata = np.array(T)
@@ -359,16 +470,18 @@ def fit_full_function(
 
     # use the first and last lin_init data values
     # for initializing the linear intercepts of L_1 and L_2
-    if b1_init == None:
+    if b1_init is None:
       b1_init = (0, sum(d[0:lin_init]) / lin_init)
 
-    if b2_init == None:
+    if b2_init is None:
       b2_init = (0, sum(d[-lin_init:]) / lin_init)
 
     x_init = np.array([ dH_init, dS_init, *b1_init, *b2_init]) # dH, dS, m1, b1, m2, b2
 
-    bounds = ([ -200, -5,       0, -np.inf, 0,      -np.inf ],
-              [0,      0,  np.inf,  np.inf, np.inf,  np.inf ])
+    bounds = _fit_bounds(xdata, ydata, bounds_mode)
+    # scipy refuses x0 that violates the bounds — clip aggressive user seeds
+    # (e.g. an FWHM-derived dH near the -200 bound) into the feasible box.
+    x_init = np.clip(x_init, bounds[0], bounds[1])
 
     scales  = [1., 0.01, 1., 100., 1., 100.]
 
@@ -406,8 +519,9 @@ def fit_full_function_multi(
     b1_inits=None,
     b2_inits=None,
     lin_init=10,
-    residuals_method="square",
+    #residuals_method="square",
     structType="heterodimer",
+    bounds_mode="loose",
     solver=None,
 ):
 
@@ -416,12 +530,10 @@ def fit_full_function_multi(
 
     # use the first and last lin_init data values
     # for initializing the linear intercepts of L_1 and L_2
-    print(len(xdata), len(ydata))
-
-    if b1_inits == None:
+    if b1_inits is None:
       b1_inits = [ (0, sum(dd[0:lin_init]) / lin_init) for dd in ds ]
 
-    if b2_inits == None:
+    if b2_inits is None:
       b2_inits = [ (0, sum(dd[-lin_init:]) / lin_init) for dd in ds ]
 
     x_inits = [ dH_init, dS_init ]
@@ -430,13 +542,16 @@ def fit_full_function_multi(
 
     x_init = np.array(x_inits)
 
-    bounds_lo = [ -200, -5 ]
-    bounds_hi = [ 0,     0 ]
+    # per-curve baseline bounds — reuse _fit_bounds to keep semantics consistent.
+    bounds_lo = [ -200., -5. ]
+    bounds_hi = [ 0.,     0. ]
     for i in range(len(ds)):
-        bounds_lo.extend([ 0, -np.inf, 0, -np.inf ])
-        bounds_hi.extend([ np.inf, np.inf, np.inf, np.inf ])
+        lo_i, hi_i = _fit_bounds(np.asarray(T[i]), np.asarray(ds[i]), bounds_mode)
+        bounds_lo.extend(lo_i[2:])   # skip the shared dH, dS entries
+        bounds_hi.extend(hi_i[2:])
 
     bounds = (bounds_lo, bounds_hi)
+    x_init = np.clip(x_init, bounds[0], bounds[1])
 
     scales = [ 1., 0.01 ]
 
@@ -444,14 +559,14 @@ def fit_full_function_multi(
         scales.extend([1, 100., 1, 100.])
 
     # `solver["residuals_method"]` overrides the positional kwarg if given.
-    if solver and solver.get("residuals_method") is not None:
-        residuals_method = solver["residuals_method"]
+    #if solver and solver.get("residuals_method") is not None:
+    #    residuals_method = solver["residuals_method"]
 
-    if residuals_method not in functions.res_diffs:
-        #print("Falling back to linear diff sum")
-        res_diff_fun = functions.res_diffs['linear']
-    else:
-        res_diff_fun = functions.res_diffs[residuals_method]
+    #if residuals_method not in functions.res_diffs:
+    #    #print("Falling back to linear diff sum")
+    #    res_diff_fun = functions.res_diffs['linear']
+    #else:
+    #    res_diff_fun = functions.res_diffs[residuals_method]
 
     sk = _solver_kwargs(solver)
     res_lsq = least_squares(functions.full_function_multi_res,
@@ -461,7 +576,7 @@ def fit_full_function_multi(
                             args = (xdata, ydata),
                             kwargs = { 'cs': cs,
                                        'c0': c0,
-                                       'res_func': res_diff_fun,
+                                       #'res_func': res_diff_fun,
                                        'structType': structType},
                             **sk)
 

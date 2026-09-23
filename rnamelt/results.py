@@ -1,33 +1,53 @@
-"""Typed result objects layered on top of `analysis_melting.run`.
+"""Typed results returned by `rnamelt.api`.
 
-Each *Result class is a thin parsed view over the dict produced by the
-orchestrator. The original dict is kept on `._raw` so `to_dict()` returns
-byte-identical output — this is the contract with the Pyodide bridge,
-which keeps consuming `analysis_melting.run` directly and is unaffected
-by this module.
+Every analysis returns a NamedTuple from this module, built directly
+from the numeric output of `rnamelt.methods` — there is no intermediate
+dict.
 
-Failed sub-fits keep `ok=False` and `error` set; call `.require()` to
-turn a failed sub-fit into a `FitFailed` exception.
+    SingleCurve.raw_tm()          -> RawTm
+    SingleCurve.vantHoff()        -> VanHoffFit
+    SingleCurve.fit()             -> SingleFit
+    MultiCurves.global_fit()      -> GlobalFit      (holds GlobalFitCurve)
+    MultiCurves.conc_dependency() -> ConcDepResult  (holds ConcentrationCurve
+                                                     and ConcentrationSeries)
+
+Failure convention
+------------------
+A failed analysis is returned, not raised: `ok` is False, `error` holds
+the reason, and every other field keeps its default. Check `ok` before
+reading values. One failed step never aborts the others — a monomer has
+a usable raw Tm alongside a van't Hoff that reports why it is undefined.
+
+`GlobalFit` and `ConcDepResult` carry `error` with no `ok` flag; for
+those, `error is None` means the analysis ran.
+
+Units
+-----
+    dH         kcal/mol
+    dS         kcal/(mol K)
+    dG         kcal/mol at 37 C
+    Tm         degrees C — ConcentrationCurve also exposes Tm_*_K in Kelvin
+    c0         M, total strand concentration
+    oligoC     uM, per-strand concentration
+    baselines  (slope, intercept), signal units per degree C
 """
 
 from __future__ import annotations
+from collections.abc import Sequence
 
-import csv
-from dataclasses import dataclass, field
-from typing import Any, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import numpy as np
-import pandas as pd
 
 
 class RawTm(NamedTuple):
-    ok:         bool                 = False
-    error:      Optional[str]        = None
-    Tm:         Optional[float]      = np.nan
-    signal:     Optional[np.ndarray] = None
-    base_b_r:   Optional[tuple]      = None
-    base_ub_r:  Optional[tuple]      = None
-    base_med_r: Optional[tuple]      = None
+    ok:       bool                          = False
+    error:    Optional[str]                 = None
+    Tm:       Optional[float]               = None
+    ym:       Optional[np.ndarray]          = None
+    base_b:   Optional[tuple[float, float]] = None
+    base_ub:  Optional[tuple[float, float]] = None
+    base_med: Optional[tuple[float, float]] = None
 
 class VanHoffFit(NamedTuple):
     """Linearised van't Hoff regression (ln K vs 1/T).
@@ -36,17 +56,17 @@ class VanHoffFit(NamedTuple):
     the linearised x-axis (1000/(T-T0)) — multiply by `slope`·x + intercept
     to recover the fitted ln(K) values.
     """
-    ok:         bool                 = False
-    error:      Optional[str]        = None
-    dH:         Optional[float]      = None
-    dS:         Optional[float]      = None
-    dG:         Optional[float]      = None
-    Tm:         Optional[float]      = None
-    t1:         Optional[np.ndarray] = None
-    K:          Optional[np.ndarray] = None
-    xdata:      Optional[np.ndarray] = None
-    ydata:      Optional[np.ndarray] = None
-    fit_params: Optional[tuple]      = None
+    ok:         bool                          = False
+    error:      Optional[str]                 = None
+    dH:         Optional[float]               = None
+    dS:         Optional[float]               = None
+    dG:         Optional[float]               = None
+    Tm:         Optional[float]               = None
+    t1:         Optional[np.ndarray]          = None
+    K:          Optional[np.ndarray]          = None
+    xdata:      Optional[np.ndarray]          = None
+    ydata:      Optional[np.ndarray]          = None
+    fit_params: Optional[tuple[float, float]] = None
 
     def __repr__(self) -> str:
         if self.ok:
@@ -55,17 +75,18 @@ class VanHoffFit(NamedTuple):
         return f"VanHoffFit(ok=False, error={self.error})"
 
 class SingleFit(NamedTuple):
-    ok:         bool                 = False
-    error:      Optional[str]        = None
-    dH:         Optional[float]      = None
-    dS:         Optional[float]      = None
-    dG:         Optional[float]      = None
-    Tm:         Optional[float]      = None
-    base_b:     Optional[tuple]      = None
-    base_ub:    Optional[tuple]      = None
-    base_med:   Optional[tuple]      = None
-    curve_fit:      Optional[np.ndarray] = None
-    derivative: Optional[np.ndarray] = None
+    ok:         bool                          = False
+    error:      Optional[str]                 = None
+    dH:         Optional[float]               = None
+    dS:         Optional[float]               = None
+    dG:         Optional[float]               = None
+    Tm:         Optional[float]               = None
+    ym:         Optional[float]               = None
+    base_b:     Optional[tuple[float, float]] = None
+    base_ub:    Optional[tuple[float, float]] = None
+    base_med:   Optional[tuple[float, float]] = None
+    curve_fit:  Optional[np.ndarray]          = None
+    derivative: Optional[np.ndarray]          = None
 
     def __repr__(self) -> str:
         if self.ok:
@@ -76,25 +97,25 @@ class SingleFit(NamedTuple):
 class GlobalFitCurve(NamedTuple):
     """One curve inside a shared-ΔH/ΔS joint fit — baselines stay per-curve."""
     name:       str
-    oligoC:     Optional[float]      = None
-    c0:         Optional[float]      = None
-    Tm_fit:     Optional[float]      = None
-    base_b:     Optional[tuple]      = None
-    base_ub:    Optional[tuple]      = None
-    base_med:   Optional[tuple]      = None
-    curve:      Optional[np.ndarray] = None
-    T_used:     Optional[np.ndarray] = None
-    signal:     Optional[np.ndarray] = None
-    signal_all: Optional[np.ndarray] = None
+    oligoC:     Optional[float]               = None
+    c0:         Optional[float]               = None
+    Tm:         Optional[float]               = None
+    base_b:     Optional[tuple[float, float]] = None
+    base_ub:    Optional[tuple[float, float]] = None
+    base_med:   Optional[tuple[float, float]] = None
+    fit:        Optional[np.ndarray]          = None
+    T_used:     Optional[np.ndarray]          = None
+    signal:     Optional[np.ndarray]          = None
+    signal_all: Optional[np.ndarray]          = None
 
 class GlobalFit(NamedTuple):
     """Return value of `MeltSet.global_fit()` — one ΔH/ΔS for all curves."""
-    dH:      Optional[float]      = None      # kcal/mol
-    dS:      Optional[float]      = None      # kcal/(mol·K)
-    dG:      Optional[float]      = None      # kcal/mol at 37 °C
-    T_used:  Optional[list]       = None      # one window per curve
-    curves:  list[GlobalFitCurve] = field(default_factory=list)
-    error:   Optional[str]        = None
+    dH:      Optional[float]          = None      # kcal/mol
+    dS:      Optional[float]          = None      # kcal/(mol·K)
+    dG:      Optional[float]          = None      # kcal/mol at 37 °C
+    T_used:  Sequence[np.ndarray]     = ()      # one window per curve
+    curves:  Sequence[GlobalFitCurve] = ()
+    error:   Optional[str]            = None
 
     def __repr__(self) -> str:
         if self.error:
@@ -102,7 +123,7 @@ class GlobalFit(NamedTuple):
         return (f"GlobalFit(dH={self.dH}, dS={self.dS}, "
             f"dG={self.dG}, curves=GlobalFitCurve({len(self.curves)}, "
             f"oligoC={[c.oligoC for c in self.curves]}, "
-            f"Tm_fit={[c.Tm_fit for c in self.curves]}))")
+            f"Tm_fit={[c.Tm for c in self.curves]}))")
 
 class ConcentrationCurve(NamedTuple):
     """One curve in a concentration series — Tm by all three extractions.
@@ -111,17 +132,17 @@ class ConcentrationCurve(NamedTuple):
     regression consumes.
     """
     name:       str
-    oligoC:     Optional[float]      = None
-    c0:         Optional[float]      = None
-    Tm_raw:     Optional[float]      = None
-    Tm_vH:      Optional[float]      = None
-    Tm_fit:     Optional[float]      = None
-    lnCT:       Optional[float]      = None
-    T_used:     Optional[np.ndarray] = None
-    signal:     Optional[np.ndarray] = None
-    signal_all: Optional[np.ndarray] = None
-    base_b:     Optional[tuple]      = None
-    base_ub:    Optional[tuple]      = None
+    oligoC:     Optional[float]               = None
+    c0:         Optional[float]               = None
+    Tm_raw:     Optional[float]               = None
+    Tm_vH:      Optional[float]               = None
+    Tm_fit:     Optional[float]               = None
+    lnCT:       Optional[float]               = None
+    T_used:     Optional[np.ndarray]          = None
+    signal:     Optional[np.ndarray]          = None
+    signal_all: Optional[np.ndarray]          = None
+    base_b:     Optional[tuple[float, float]] = None
+    base_ub:    Optional[tuple[float, float]] = None
 
     @staticmethod
     def _to_K(T_C: Optional[float]) -> Optional[float]:
@@ -154,7 +175,6 @@ class ConcentrationCurve(NamedTuple):
             "fit": self.Tm_fit_K,
         }[method]
 
-
 class ConcentrationSeries(NamedTuple):
     """1/Tm vs ln(C_T/f) linear regression for one Tm-extraction method."""
     method:      str
@@ -163,7 +183,7 @@ class ConcentrationSeries(NamedTuple):
     n:           Optional[int]        = None
     dH:          Optional[float]      = None
     dS:          Optional[float]      = None
-    dG_37:       Optional[float]      = None
+    dG:          Optional[float]      = None
     r_squared:   Optional[float]      = None
     slope:       Optional[float]      = None
     intercept:   Optional[float]      = None
@@ -173,17 +193,14 @@ class ConcentrationSeries(NamedTuple):
     inv_tm_line: Optional[np.ndarray] = None
 
 class ConcDepResult(NamedTuple):
-    struct_type:        str                       = "heterodimer"
-    self_complementary: bool                      = False
-    per_curve:          list[ConcentrationCurve]  = field(default_factory=list)
-    skipped:            list[dict]                = field(default_factory=list)
-    series_raw:         ConcentrationSeries       = field(
-        default_factory=lambda: ConcentrationSeries(method="raw"))
-    series_vh:          ConcentrationSeries       = field(
-        default_factory=lambda: ConcentrationSeries(method="vh"))
-    series_fit:         ConcentrationSeries       = field(
-        default_factory=lambda: ConcentrationSeries(method="fit"))
-    error:              Optional[str]             = None
+    struct_type:        str                          = "heterodimer"
+    self_complementary: bool                         = False
+    per_curve:          Sequence[ConcentrationCurve] = ()
+    skipped:            Sequence[dict]               = ()
+    series_raw:         ConcentrationSeries          = ConcentrationSeries(method='raw')
+    series_vh:          ConcentrationSeries          = ConcentrationSeries(method='vh')
+    series_fit:         ConcentrationSeries          = ConcentrationSeries(method='fit')
+    error:              Optional[str]                = None
 
     def __repr__(self) -> str:
         if self.error:

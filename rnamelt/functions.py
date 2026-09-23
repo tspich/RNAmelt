@@ -1,28 +1,7 @@
-from functools import reduce
-
 import numpy as np
 from scipy.optimize import least_squares
 
 from rnamelt import constants
-
-def res_diff(vs):
-    return vs[0] - vs[1]
-
-def res_diff_square(vs):
-    return (vs[0] - vs[1]) * (vs[0] - vs[1])
-
-def res_diff_cubic(vs):
-    return (vs[0] - vs[1]) * (vs[0] - vs[1]) * (vs[0] - vs[1])
-
-def res_diff_quadratic(vs):
-    return (vs[0] - vs[1]) * (vs[0] - vs[1]) * (vs[0] - vs[1]) * (vs[0] - vs[1])
-
-res_diffs = {
-    'linear': res_diff,
-    'square': res_diff_square,
-    'cubic':  res_diff_cubic,
-    'quadratic' : res_diff_quadratic,
-}
 
 def linear(x, a, b):
     return a * x + b
@@ -43,35 +22,60 @@ def fit_linear(T, d, minT, maxT):
 
     return (res_lsq.x[0], res_lsq.x[1])
 
-def intersect_lin(m, b, xs, ys, border = 10, min_value = 0, max_value = 10000):
-    """
-    Find the intersection of a linear function with
-    slope m and intersect b and a set of X-Y coordinates
-    given in lists xs and ys.
-    """
-    # 1. find point closest to the data
-    closest = (min_value, max_value)
-    for (i, y) in enumerate(ys[border:-border], start = border):
-        v = linear(xs[i], m, b)
-        if y < v and ys[i + 1] >= v:
-            closest = (i, abs(y - v))
-            break
+#def intersect_lin(m, b, xs, ys, border = 10, min_value = 0, max_value = 10000):
+#    """
+#    Find the intersection of a linear function with
+#    slope m and intersect b and a set of X-Y coordinates
+#    given in lists xs and ys.
+#    """
+#    # 1. find point closest to the data
+#    closest = (min_value, max_value)
+#    for (i, y) in enumerate(ys[border:-border], start = border):
+#        v = linear(xs[i], m, b)
+#        if y < v and ys[i + 1] >= v:
+#            closest = (i, abs(y - v))
+#            break
+#
+#    # 2. perform linear interpolation
+#    x1, y1 = xs[closest[0]], ys[closest[0]]
+#    if y1 < linear(x1, m, b):
+#        x2, y2 = x1, y1
+#        x1, y1 = xs[closest[0] - 1], ys[closest[0] - 1]
+#    else:
+#        x2, y2 = xs[closest[0] + 1], ys[closest[0] + 1]
+#
+#    m_int = (y2 - y1) / (x2 - x1)
+#    b_int = y1 - m_int * x1
+#
+#    x     = (b_int - b) / (m - m_int)
+#    y     = linear(x, m, b)
+#
+#    return x, y
 
-    # 2. perform linear interpolation
-    x1, y1 = xs[closest[0]], ys[closest[0]]
-    if y1 < linear(x1, m, b):
-        x2, y2 = x1, y1
-        x1, y1 = xs[closest[0] - 1], ys[closest[0] - 1]
-    else:
-        x2, y2 = xs[closest[0] + 1], ys[closest[0] + 1]
+def intersect_lin(m, b, xs, ys, border=10):
+    diffs = [y - linear(x, m, b) for x, y in zip(xs, ys)]
+    hits = [i for i in range(border, len(ys) - border - 1)
+            if diffs[i] == 0 or diffs[i] * diffs[i + 1] < 0]
+    if not hits:
+        raise ValueError(
+            f"baseline does not intersect data in window "
+            f"[{xs[border]:.1f}, {xs[-border-1]:.1f}]"
+        )
 
+    i = hits[0]
+    if len(hits)>1:
+        midT = 0.5 * (xs[0] + xs[-1])
+        i = min(hits, key=lambda k: abs(xs[k] - midT))
+        #for j in range(1, len(hits)):
+        #    if abs(xs[hits[j]]-midT) < abs(xs[i]-midT):
+        #        i = hits[j]
+
+    x1, y1 = xs[i], ys[i]
+    x2, y2 = xs[i + 1], ys[i + 1]
     m_int = (y2 - y1) / (x2 - x1)
     b_int = y1 - m_int * x1
-
-    x     = (b_int - b) / (m - m_int)
-    y     = linear(x, m, b)
-
-    return x, y
+    x = (b_int - b) / (m - m_int)
+    return x, linear(x, m, b)
 
 def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, structType='heterodimer'):
     if structType == 'heterodimer':
@@ -79,15 +83,21 @@ def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, structType='heterodimer'
     elif structType == 'homodimer':
         theta = theta_from_therm_homo(T, dH, dS, c0)
     elif structType == 'monomer':
-        theta = theta_from_therm_mono(T, dH, dS, c0)
+        theta = theta_from_therm_mono(T, dH, dS)
+    else:
+        raise ValueError(
+            f"unknown structType {structType!r}; "
+            f"valid: 'heterodimer', 'homodimer', 'monomer'"
+        )
     return theta * (m1 * T + b1) + (1 - theta) * (m2 * T + b2)
 
 def full_function_res(x, T, y, c0 = 1e-6, structType = 'heterodimer'):
-    return y - full_function(T, *x, c0, structType)
+    dH, dS, m1, b1, m2, b2 = x
+    return y - full_function(T, dH, dS, m1, b1, m2, b2, c0, structType)
 
 def full_function_multi(temps, *args, **kwargs):
     default_c0 = 1e-6
-    default_structType = 'hetero'
+    default_structType = 'heterodimer'
     # prepare variables and constants
     f = []
     m1s = []
@@ -123,7 +133,12 @@ def full_function_multi(temps, *args, **kwargs):
         elif structType == 'homodimer':
             theta = theta_from_therm_homo(temps[i], dH, dS, c)
         elif structType == 'monomer':
-            theta = theta_from_therm_mono(temps[i], dH, dS, c)
+            theta = theta_from_therm_mono(temps[i], dH, dS)
+        else:
+            raise ValueError(
+                f"unknown structType {structType!r}; "
+                f"valid: 'heterodimer', 'homodimer', 'monomer'"
+            )
 
         f.append(theta * (m1s[i] * temps[i] + b1s[i]) + (1 - theta) * (m2s[i] * temps[i] + b2s[i]))
 
@@ -131,13 +146,20 @@ def full_function_multi(temps, *args, **kwargs):
 
 def full_function_multi_res(x, temps, ys, **kwargs):
     # set residual function, default to simple differences
-    res_func = kwargs.get('res_func', res_diff)
+    #res_func = kwargs.get('res_func', res_diff)
+    fits = full_function_multi(temps, x, **kwargs)
 
-    if not res_func:
-        res_func = res_diff
+    blocks = []
+    for y, f in zip(ys, fits):
+        r = np.asarray(y, dtype=float).ravel() - np.asarray(f, dtype=float).ravel()
+        blocks.append(r)
 
-    # compute and return actual sum of residuals
-    return reduce(lambda x, y: x + y, map(res_func, zip(ys, full_function_multi(temps, x, **kwargs))))
+    return np.concatenate(blocks)
+    #if not res_func:
+    #    res_func = res_diff
+
+    ## compute and return actual sum of residuals
+    #return reduce(lambda x, y: x + y, map(res_func, zip(ys, full_function_multi(temps, x, **kwargs))))
 
 def theta_from_therm(T, dH, dS, c0 = 1e-6):
     tt    = T - constants.T0
@@ -151,7 +173,10 @@ def theta_from_therm_homo(T, dH, dS, c0 = 1e-6):
     term = np.sqrt(8 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
     return (term - 1) / (term + 1)
 
-def theta_from_therm_mono(T, dH, dS, c0 = 1e-6):
+def theta_from_therm_mono(T, dH, dS):
     tt    = T - constants.T0
     dG    = dH - tt * dS
     return np.exp(- dG / (constants.R * tt))/(1+np.exp(- dG / (constants.R * tt)))
+
+
+
