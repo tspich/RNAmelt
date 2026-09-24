@@ -215,13 +215,42 @@ def find_baselines(
 
     peak_idx = int(np.argmax(d1) if direction_up else np.argmin(d1))
 
-    # Shoulders: opposite signs on each side of Tm by construction.
-    if direction_up:
-        cold_shoulder = int(np.argmax(d2[: peak_idx + 1]))
-        hot_shoulder = int(np.argmin(d2[peak_idx:])) + peak_idx
-    else:
-        cold_shoulder = int(np.argmin(d2[: peak_idx + 1]))
-        hot_shoulder = int(np.argmax(d2[peak_idx:])) + peak_idx
+    # Shoulders: opposite signs on each side of Tm by construction of a
+    # two-state transition. For an up-going transition (direction_up=True),
+    # d2 is positive on the cold side (rising slope is increasing) and
+    # negative on the hot side; flipped for a down-going transition.
+    from scipy.signal import find_peaks
+    sign = 1.0 if direction_up else -1.0
+
+    def _pick_shoulder(x: np.ndarray, prefer: str, prom_frac: float) -> int:
+        """Return the index of the shoulder in ``x`` (already sign-oriented
+        so real shoulders show up as positive maxima). ``prefer='last'``
+        returns the maximum with the *highest* index, ``prefer='first'``
+        the *lowest* — always picking the peak closest to the transition
+        centre. Falls back to the global argmax on featureless slices."""
+        if x.size == 0:
+            return 0
+        peak_mag = float(np.abs(x).max())
+        if peak_mag <= 0.0:
+            return int(np.argmax(x))
+        peaks, _ = find_peaks(x, prominence=prom_frac * peak_mag)
+        if len(peaks) == 0:
+            return int(np.argmax(x))
+        return int(peaks[-1] if prefer == 'last' else peaks[0])
+
+    # Cold side: from index 0 (scan edge) up to peak_idx inclusive. The real
+    # sigmoid shoulder sits close to peak_idx; edge-region artifacts (initial
+    # rise, instrument warm-up) sit near index 0. Picking the peak with the
+    # highest index rejects them — an artifact at index 0 isn't a peak
+    # (find_peaks requires strict inequality on both sides).
+    cold_slice = sign * d2[: peak_idx + 1]
+    cold_shoulder = _pick_shoulder(cold_slice, prefer='last', prom_frac=0.10)
+
+    # Hot side: from peak_idx to n-1. Real shoulder near peak_idx (low index
+    # in this slice); edge artifacts near the end. Pick lowest index.
+    hot_slice = -sign * d2[peak_idx:]
+    hot_shoulder_off = _pick_shoulder(hot_slice, prefer='first', prom_frac=0.10)
+    hot_shoulder = hot_shoulder_off + peak_idx
 
     cold_sign = int(np.sign(d2[cold_shoulder]))
     hot_sign = int(np.sign(d2[hot_shoulder]))
@@ -245,11 +274,82 @@ def find_baselines(
             hot_boundary = i
             break
 
-    # Initial baseline window edges.
-    fold_low_T = float(T[0])
+    # Inner-artifact scan on each plateau. If a spurious d^2 excursion of
+    # the same sign as the shoulder lives inside the plateau region
+    # (initial-rise artifacts, instrument settling, photobleaching drift),
+    # push fold_low_T / unf_high_T *past* it so the OLS baseline isn't
+    # pulled by the contamination.
+    #
+    # We use argmax rather than find_peaks because edge-adjacent artifacts
+    # aren't local maxima under find_peaks' strict-inequality definition.
+    # The magnitude threshold ``artifact_min_frac_of_shoulder`` (30% of the
+    # sigmoid shoulder's |d^2|) keeps clean plateaus untouched — their
+    # residual d^2 sits at the noise level, well below that fraction.
+    artifact_min_frac_of_shoulder = 0.30
+    cold_shoulder_mag = abs(float(d2[cold_shoulder]))
+    hot_shoulder_mag  = abs(float(d2[hot_shoulder]))
+
+    def _detect_artifact(scan_slice: np.ndarray, sign_local: int,
+                         shoulder_mag: float) -> tuple[int, float] | None:
+        """Return (peak_index_inside_slice, oriented_magnitude) for the
+        largest same-signed d^2 excursion in the plateau slice, provided
+        it exceeds ``artifact_min_frac_of_shoulder`` of the sigmoid
+        shoulder magnitude. Returns None on clean plateaus."""
+        if scan_slice.size < 4 or shoulder_mag <= 0.0:
+            return None
+        oriented = sign_local * scan_slice
+        art_local = int(np.argmax(oriented))
+        art_mag = float(oriented[art_local])
+        if art_mag < artifact_min_frac_of_shoulder * shoulder_mag:
+            return None
+        return art_local, art_mag
+
+    # Cold-side plateau is d2[0:cold_boundary].
+    if cold_boundary >= 4:
+        art = _detect_artifact(d2[:cold_boundary], cold_sign, cold_shoulder_mag)
+        if art is not None:
+            art_idx, art_mag = art
+            art_thresh = zero_tol_frac * art_mag
+            # Walk from artifact peak toward cold_boundary (higher T) until
+            # d^2 has decayed past the artifact's decay tolerance.
+            trimmed_low = art_idx
+            for i in range(art_idx + 1, cold_boundary):
+                if float(d2[i]) * cold_sign < art_thresh:
+                    trimmed_low = i
+                    break
+            initial_low_idx = (trimmed_low
+                if T[cold_boundary] - T[trimmed_low] >= min_baseline_width
+                else 0)
+        else:
+            initial_low_idx = 0
+    else:
+        initial_low_idx = 0
+
+    # Hot-side plateau is d2[hot_boundary+1:]; mirrored.
+    if hot_boundary <= n - 5:
+        art = _detect_artifact(d2[hot_boundary + 1:], hot_sign, hot_shoulder_mag)
+        if art is not None:
+            art_off, art_mag = art
+            art_idx = art_off + hot_boundary + 1
+            art_thresh = zero_tol_frac * art_mag
+            trimmed_high = art_idx
+            for i in range(art_idx - 1, hot_boundary, -1):
+                if float(d2[i]) * hot_sign < art_thresh:
+                    trimmed_high = i
+                    break
+            initial_high_idx = (trimmed_high
+                if T[trimmed_high] - T[hot_boundary] >= min_baseline_width
+                else n - 1)
+        else:
+            initial_high_idx = n - 1
+    else:
+        initial_high_idx = n - 1
+
+    # Initial baseline window edges (artifact-aware outer bounds).
+    fold_low_T = float(T[initial_low_idx])
     fold_high_T = float(T[cold_boundary])
     unf_low_T = float(T[hot_boundary])
-    unf_high_T = float(T[-1])
+    unf_high_T = float(T[initial_high_idx])
 
     # min_baseline_width guard -- if the transition abuts a scan edge and
     # the boundary landed there, push it in by min_baseline_width.

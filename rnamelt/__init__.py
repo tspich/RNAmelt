@@ -6,29 +6,42 @@ Public API:
 
     from rnamelt import SingleCurve, MultiCurves
 
-    c = SingleCurve(temps, signal, oligo=0.5)
+    c = SingleCurve(temps, signal, oligoC=0.5)
     c.raw_tm()                         # → RawTm
-    c.vantHoff()                       # → VanHoffFit
+    c.vant_hoff()                       # → VanHoffFit
     c.fit()                            # → SingleFit
 
     m = MultiCurves([c1, c2, c3])
     m.global_fit()                     # → GlobalFit
     m.conc_dependency()                # → ConcDepResult
 
-Curves are independent: each carries its own concentration, transition
-window and baseline offsets, so a MultiCurves may hold curves of
-different lengths.
+Curves are independent: each carries its own concentration and baseline
+windows (given, or auto-detected when omitted), so a MultiCurves may hold
+curves of different lengths.
 
-Solver, van't Hoff and initial-guess defaults are exposed as
-SOLVER_DEFAULTS, VH_DEFAULTS and FIT_INIT_DEFAULTS; override them per
-curve through the matching `solver=`, `vh=` and `fit_init=` arguments.
+Every tunable default lives in one dict: WINDOW_DEFAULTS, SOLVER_DEFAULTS,
+VH_DEFAULTS, FIT_INIT_DEFAULTS, BOUNDS_DEFAULTS, MULTISTART_DEFAULTS and
+RAW_DEFAULTS. Override them per curve with the matching `windows=`,
+`solver=`, `vh=`, `fit_init=`, `bounds=`, `multistart=` and `raw=`
+arguments of SingleCurve, or per call on its analysis methods.
 """
 
 from rnamelt.api import (
     SingleCurve,
     MultiCurves,
 )
-from rnamelt.methods import FIT_INIT_DEFAULTS, SOLVER_DEFAULTS, VH_DEFAULTS
+from rnamelt.methods import (
+    BOUNDS_DEFAULTS,
+    BOUNDS_MODES,
+    FIT_INIT_DEFAULTS,
+    MULTISTART_DEFAULTS,
+    RAW_DEFAULTS,
+    SOLVER_DEFAULTS,
+    VH_DEFAULTS,
+    WINDOW_DEFAULTS,
+    BaselineWarning,
+    ConvergenceWarning,
+)
 from rnamelt.results import (
     RawTm,
     VanHoffFit,
@@ -39,10 +52,6 @@ from rnamelt.results import (
     ConcentrationCurve,
     ConcentrationSeries,
 )
-
-#ANALYSES = [
-#    "rnamelt.analysis_melting",
-#]
 
 __all__ = [
     # analysis entry points
@@ -62,4 +71,11 @@ __all__ = [
     "SOLVER_DEFAULTS",
     "VH_DEFAULTS",
     "FIT_INIT_DEFAULTS",
+    "BOUNDS_DEFAULTS",
+    "BOUNDS_MODES",
+    "MULTISTART_DEFAULTS",
+    "RAW_DEFAULTS",
+    "WINDOW_DEFAULTS",
+    "BaselineWarning",
+    "ConvergenceWarning",
 ]

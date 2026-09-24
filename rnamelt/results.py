@@ -5,7 +5,7 @@ from the numeric output of `rnamelt.methods` — there is no intermediate
 dict.
 
     SingleCurve.raw_tm()          -> RawTm
-    SingleCurve.vantHoff()        -> VanHoffFit
+    SingleCurve.vant_hoff()        -> VanHoffFit
     SingleCurve.fit()             -> SingleFit
     MultiCurves.global_fit()      -> GlobalFit      (holds GlobalFitCurve)
     MultiCurves.conc_dependency() -> ConcDepResult  (holds ConcentrationCurve
@@ -18,8 +18,7 @@ the reason, and every other field keeps its default. Check `ok` before
 reading values. One failed step never aborts the others — a monomer has
 a usable raw Tm alongside a van't Hoff that reports why it is undefined.
 
-`GlobalFit` and `ConcDepResult` carry `error` with no `ok` flag; for
-those, `error is None` means the analysis ran.
+Every result, `GlobalFit` and `ConcDepResult` included, carries `ok`.
 
 Units
 -----
@@ -86,12 +85,16 @@ class SingleFit(NamedTuple):
     base_ub:    Optional[tuple[float, float]] = None
     base_med:   Optional[tuple[float, float]] = None
     curve_fit:  Optional[np.ndarray]          = None
-    derivative: Optional[np.ndarray]          = None
+    converged:  bool                          = True   # False: stopped at max_nfev
+    # Starting values actually used: {"dH", "dS", "dH_from", "dS_from"},
+    # *_from in {"user", "vh", "fallback", "multistart"}.
+    seed:       Optional[dict]                = None
 
     def __repr__(self) -> str:
         if self.ok:
             return (f"SingleFit(dH={self.dH}, dS={self.dS}, "
-                f"dG={self.dG}, Tm={self.Tm})")
+                f"dG={self.dG}, Tm={self.Tm}"
+                + ("" if self.converged else ", converged=False") + ")")
         return f"SingleFit(ok=False, error={self.error})"
 
 class GlobalFitCurve(NamedTuple):
@@ -109,13 +112,16 @@ class GlobalFitCurve(NamedTuple):
     signal_all: Optional[np.ndarray]          = None
 
 class GlobalFit(NamedTuple):
-    """Return value of `MeltSet.global_fit()` — one ΔH/ΔS for all curves."""
+    """Return value of `MultiCurves.global_fit()` — one ΔH/ΔS for all curves."""
+    ok:      bool                     = False
     dH:      Optional[float]          = None      # kcal/mol
     dS:      Optional[float]          = None      # kcal/(mol·K)
     dG:      Optional[float]          = None      # kcal/mol at 37 °C
     T_used:  Sequence[np.ndarray]     = ()      # one window per curve
     curves:  Sequence[GlobalFitCurve] = ()
     error:   Optional[str]            = None
+    converged: bool                   = True   # False: stopped at max_nfev
+    seed:      Optional[dict]         = None   # see SingleFit.seed
 
     def __repr__(self) -> str:
         if self.error:
@@ -193,6 +199,10 @@ class ConcentrationSeries(NamedTuple):
     inv_tm_line: Optional[np.ndarray] = None
 
 class ConcDepResult(NamedTuple):
+    """Return value of `MultiCurves.conc_dependency()`. ``ok`` is True when
+    at least two curves gave a usable Tm; each ``series_*`` has its own
+    ``ok`` / ``error``."""
+    ok:                 bool                         = False
     struct_type:        str                          = "heterodimer"
     self_complementary: bool                         = False
     per_curve:          Sequence[ConcentrationCurve] = ()

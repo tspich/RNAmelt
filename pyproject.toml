@@ -37,9 +37,6 @@ dependencies = [
 [project.optional-dependencies]
 plots = ["matplotlib>=3.5"]
 
-[project.scripts]
-rnamelt = "rnamelt.__main__:main"
-
 [project.urls]
 Homepage = "https://github.com/tspich/RNAmelt"
 Issues = "https://github.com/tspich/RNAmelt/issues"

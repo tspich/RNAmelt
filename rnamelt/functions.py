@@ -10,8 +10,22 @@ def linear_res(x, T, y):
     return linear(T, *x) - y
 
 def fit_linear(T, d, minT, maxT):
-    start = next(i for i,v in enumerate(T) if v >= minT) # TS: change > to >= to include first temperature (10.0)
-    stop  = next(i for i,v in enumerate(T) if v >= maxT)
+    # Locate the window [start, stop] with defensive clamps. When a caller
+    # supplies a boundary just above/below the scan (e.g. a JS toFixed(1)
+    # rounding a T[-1]=89.6999969 up to 89.7) the naive `next()` raises
+    # StopIteration with an empty message and blows up the whole pipeline
+    # silently. Clamp gracefully instead.
+    start = next((i for i, v in enumerate(T) if v >= minT), None)
+    if start is None:
+        raise ValueError(
+            f"fit_linear: minT={minT} above scan max T={T[-1]} — no data in window"
+        )
+    stop = next((i for i, v in enumerate(T) if v >= maxT), len(T) - 1)
+    if stop - start + 1 < 2:
+        raise ValueError(
+            f"fit_linear: window [{minT}, {maxT}] holds fewer than 2 points "
+            f"within T=[{T[0]}, {T[-1]}]"
+        )
 
     xdata = np.array(T[start:stop + 1])
     ydata = np.array(d[start:stop + 1])
@@ -22,53 +36,24 @@ def fit_linear(T, d, minT, maxT):
 
     return (res_lsq.x[0], res_lsq.x[1])
 
-#def intersect_lin(m, b, xs, ys, border = 10, min_value = 0, max_value = 10000):
-#    """
-#    Find the intersection of a linear function with
-#    slope m and intersect b and a set of X-Y coordinates
-#    given in lists xs and ys.
-#    """
-#    # 1. find point closest to the data
-#    closest = (min_value, max_value)
-#    for (i, y) in enumerate(ys[border:-border], start = border):
-#        v = linear(xs[i], m, b)
-#        if y < v and ys[i + 1] >= v:
-#            closest = (i, abs(y - v))
-#            break
-#
-#    # 2. perform linear interpolation
-#    x1, y1 = xs[closest[0]], ys[closest[0]]
-#    if y1 < linear(x1, m, b):
-#        x2, y2 = x1, y1
-#        x1, y1 = xs[closest[0] - 1], ys[closest[0] - 1]
-#    else:
-#        x2, y2 = xs[closest[0] + 1], ys[closest[0] + 1]
-#
-#    m_int = (y2 - y1) / (x2 - x1)
-#    b_int = y1 - m_int * x1
-#
-#    x     = (b_int - b) / (m - m_int)
-#    y     = linear(x, m, b)
-#
-#    return x, y
-
-def intersect_lin(m, b, xs, ys, border=10):
+def intersect_lin(m, b, xs, ys, edge_skip=10):
+    """First crossing (nearest the window centre if several) of the line
+    y = m·x + b with the data (xs, ys), by linear interpolation. The first
+    and last ``edge_skip`` points are ignored."""
     diffs = [y - linear(x, m, b) for x, y in zip(xs, ys)]
-    hits = [i for i in range(border, len(ys) - border - 1)
+    hits = [i for i in range(edge_skip, len(ys) - edge_skip - 1)
             if diffs[i] == 0 or diffs[i] * diffs[i + 1] < 0]
     if not hits:
+        lo = xs[min(edge_skip, len(xs) - 1)]
+        hi = xs[max(-edge_skip - 1, -len(xs))]
         raise ValueError(
-            f"baseline does not intersect data in window "
-            f"[{xs[border]:.1f}, {xs[-border-1]:.1f}]"
+            f"baseline does not intersect data in window [{lo:.1f}, {hi:.1f}]"
         )
 
     i = hits[0]
-    if len(hits)>1:
+    if len(hits) > 1:
         midT = 0.5 * (xs[0] + xs[-1])
         i = min(hits, key=lambda k: abs(xs[k] - midT))
-        #for j in range(1, len(hits)):
-        #    if abs(xs[hits[j]]-midT) < abs(xs[i]-midT):
-        #        i = hits[j]
 
     x1, y1 = xs[i], ys[i]
     x2, y2 = xs[i + 1], ys[i + 1]
@@ -77,27 +62,27 @@ def intersect_lin(m, b, xs, ys, border=10):
     x = (b_int - b) / (m - m_int)
     return x, linear(x, m, b)
 
-def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, structType='heterodimer'):
-    if structType == 'heterodimer':
+def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, struct_type='heterodimer'):
+    if struct_type == 'heterodimer':
         theta = theta_from_therm(T, dH, dS, c0)
-    elif structType == 'homodimer':
+    elif struct_type == 'homodimer':
         theta = theta_from_therm_homo(T, dH, dS, c0)
-    elif structType == 'monomer':
+    elif struct_type == 'monomer':
         theta = theta_from_therm_mono(T, dH, dS)
     else:
         raise ValueError(
-            f"unknown structType {structType!r}; "
+            f"unknown struct_type {struct_type!r}; "
             f"valid: 'heterodimer', 'homodimer', 'monomer'"
         )
     return theta * (m1 * T + b1) + (1 - theta) * (m2 * T + b2)
 
-def full_function_res(x, T, y, c0 = 1e-6, structType = 'heterodimer'):
+def full_function_res(x, T, y, c0 = 1e-6, struct_type = 'heterodimer'):
     dH, dS, m1, b1, m2, b2 = x
-    return y - full_function(T, dH, dS, m1, b1, m2, b2, c0, structType)
+    return y - full_function(T, dH, dS, m1, b1, m2, b2, c0, struct_type)
 
 def full_function_multi(temps, *args, **kwargs):
     default_c0 = 1e-6
-    default_structType = 'heterodimer'
+    default_struct_type = 'heterodimer'
     # prepare variables and constants
     f = []
     m1s = []
@@ -125,18 +110,18 @@ def full_function_multi(temps, *args, **kwargs):
     if not cs:
         cs = default_cs
 
-    structType = kwargs.get('structType', default_structType)
+    struct_type = kwargs.get('struct_type', default_struct_type)
     # compose result function fit
     for i, c in enumerate(cs):
-        if structType == 'heterodimer':
+        if struct_type == 'heterodimer':
             theta = theta_from_therm(temps[i], dH, dS, c)
-        elif structType == 'homodimer':
+        elif struct_type == 'homodimer':
             theta = theta_from_therm_homo(temps[i], dH, dS, c)
-        elif structType == 'monomer':
+        elif struct_type == 'monomer':
             theta = theta_from_therm_mono(temps[i], dH, dS)
         else:
             raise ValueError(
-                f"unknown structType {structType!r}; "
+                f"unknown struct_type {struct_type!r}; "
                 f"valid: 'heterodimer', 'homodimer', 'monomer'"
             )
 
@@ -145,21 +130,38 @@ def full_function_multi(temps, *args, **kwargs):
     return f
 
 def full_function_multi_res(x, temps, ys, **kwargs):
-    # set residual function, default to simple differences
-    #res_func = kwargs.get('res_func', res_diff)
+    """Concatenated per-curve residuals (data − model) of the joint fit."""
     fits = full_function_multi(temps, x, **kwargs)
+    return np.concatenate([
+        np.asarray(y, dtype=float).ravel() - np.asarray(f, dtype=float).ravel()
+        for y, f in zip(ys, fits)
+    ])
 
-    blocks = []
-    for y, f in zip(ys, fits):
-        r = np.asarray(y, dtype=float).ravel() - np.asarray(f, dtype=float).ravel()
-        blocks.append(r)
+# Equilibrium constant of folding at the melting temperature (θ = 1/2),
+# in units of 1/c0 for the bimolecular cases:
+#   heterodimer  A + B ⇌ AB : K = 2θ / (c0 (1-θ)²)  →  K(Tm) = 4 / c0
+#   homodimer    2A ⇌ A₂    : K = θ / (2 c0 (1-θ)²) →  K(Tm) = 1 / c0
+#   monomer      A ⇌ A*     : K = θ / (1-θ)         →  K(Tm) = 1
+_K_AT_TM_FACTOR = {"heterodimer": 4.0, "homodimer": 1.0}
 
-    return np.concatenate(blocks)
-    #if not res_func:
-    #    res_func = res_diff
 
-    ## compute and return actual sum of residuals
-    #return reduce(lambda x, y: x + y, map(res_func, zip(ys, full_function_multi(temps, x, **kwargs))))
+def tm_from_therm(dH, dS, c0=1e-6, struct_type='heterodimer'):
+    """Model melting temperature (°C) where the folded fraction θ is 1/2.
+
+    dH in kcal/mol, dS in kcal/(mol·K), c0 = total strand concentration (M).
+    Solves ΔH − Tm·ΔS = −R·Tm·ln K(Tm) for Tm.
+    """
+    if struct_type == 'monomer':
+        denom = dS
+    elif struct_type in _K_AT_TM_FACTOR:
+        denom = dS + constants.R * np.log(c0 / _K_AT_TM_FACTOR[struct_type])
+    else:
+        raise ValueError(
+            f"unknown struct_type {struct_type!r}; "
+            f"valid: 'heterodimer', 'homodimer', 'monomer'"
+        )
+    return dH / denom + constants.T0
+
 
 def theta_from_therm(T, dH, dS, c0 = 1e-6):
     tt    = T - constants.T0

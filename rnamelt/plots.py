@@ -127,7 +127,7 @@ def plot_raw_data(axs,
         ax2.set_ylabel("-d(F) / d(T)")
 
 
-def plot_vantHoff(axs,
+def plot_vant_hoff(axs,
                   t1,
                   K,
                   c0,
@@ -330,8 +330,8 @@ def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5
     otherwise a new figure is created. Returns `(fig, axes)`.
     """
     raw = raw if raw is not None else curve.raw_tm()
-    vh  = vh  if vh  is not None else curve.vantHoff(raw=raw)
-    fit = fit if fit is not None else curve.fit(vh=vh)
+    vh  = vh  if vh  is not None else curve.vant_hoff(base_b=raw.base_b, base_ub=raw.base_ub)
+    fit = fit if fit is not None else curve.fit(vh_fit=vh)
     T_used, signal = curve.windowed_data()
 
     if axes is None:
@@ -349,16 +349,16 @@ def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5
         axes[0], curve.temps, curve.signal,
         derivative=False,
         base_bound   = tuple(raw.base_b)  if raw.base_b  else False,
-        base_bound_Tmax=curve.T_low+30, #curve.bl_lower_offset,
+        base_bound_Tmax=curve.fold_low_T+30,
         base_unbound = tuple(raw.base_ub) if raw.base_ub else False,
-        base_unbound_Tmin=curve.T_high-curve.bl_upper_offset,
+        base_unbound_Tmin=curve.unf_low_T,
         base_med= tuple(raw.base_med) if raw.base_med else False,
         melting_point=mp,
     )
     axes[0].set_title(f"{curve.name}: raw + baselines")
     axes[0].legend(fontsize="small", loc="best")
 
-    # ── panel 2: van't Hoff (custom — bypasses plot_vantHoff's hard limits)
+    # ── panel 2: van't Hoff (custom — bypasses plot_vant_hoff's hard limits)
     if not vh.ok:
         axes[1].text(0.5, 0.5, f"van't Hoff failed:\n{vh.error}",
                      ha="center", va="center", transform=axes[1].transAxes)
