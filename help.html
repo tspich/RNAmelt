@@ -86,7 +86,7 @@ tailwind.config = {
   <header class="flex items-start justify-between mb-8 pb-5 border-b border-border gap-6">
     <div>
       <h1 class="text-3xl font-semibold tracking-tight">RNA Melt — Help</h1>
-      <p class="text-sm text-muted mt-1">How to run analyses in the browser, on the CLI, and from Python.</p>
+      <p class="text-sm text-muted mt-1">How to run analyses in the browser and from Python.</p>
     </div>
     <a href="index.html" class="text-sm font-mono text-accent hover:underline shrink-0 mt-1">← back to app</a>
   </header>
@@ -100,20 +100,21 @@ tailwind.config = {
         <a class="toc-link" href="#browser">1. Browser</a>
         <a class="toc-link indent" href="#csv-format">CSV format</a>
         <a class="toc-link indent" href="#workflow">Workflow</a>
+        <a class="toc-link indent" href="#windows">Baseline windows</a>
+        <a class="toc-link indent" href="#advanced">Advanced settings</a>
+        <a class="toc-link indent" href="#buttons">Reset &amp; Clear</a>
         <a class="toc-link indent" href="#modes">Analysis modes</a>
         <a class="toc-link indent" href="#charts">Chart interactions</a>
         <a class="toc-link indent" href="#download">Download</a>
-        <a class="toc-link" href="#cli">2. CLI</a>
-        <a class="toc-link indent" href="#cli-run">Running</a>
-        <a class="toc-link indent" href="#cli-examples">Examples</a>
-        <a class="toc-link indent" href="#cli-flags">Flags</a>
-        <a class="toc-link" href="#api">3. Python API</a>
-        <a class="toc-link indent" href="#api-class">MeltAnalysis class</a>
-        <a class="toc-link indent" href="#api-arrays">From raw arrays</a>
+        <a class="toc-link" href="#api">2. Python API</a>
+        <a class="toc-link indent" href="#api-single">SingleCurve</a>
+        <a class="toc-link indent" href="#api-windows">Baseline windows</a>
+        <a class="toc-link indent" href="#api-multi">MultiCurves</a>
+        <a class="toc-link indent" href="#api-settings">Settings</a>
+        <a class="toc-link indent" href="#api-seeds">Starting values</a>
+        <a class="toc-link indent" href="#api-results">Results</a>
         <a class="toc-link indent" href="#api-plotting">Plotting</a>
-        <a class="toc-link indent" href="#api-functions">Functional helpers</a>
-        <a class="toc-link indent" href="#api-result">Result shape</a>
-        <a class="toc-link" href="#model">Two-state model</a>
+        <a class="toc-link" href="#model">3. Two-state model</a>
       </div>
     </nav>
 
@@ -134,12 +135,49 @@ tailwind.config = {
         <h3 id="workflow">Workflow</h3>
         <ol class="dec">
           <li>Drag &amp; drop a CSV onto the upload zone — or click to browse.</li>
-          <li>Pick a signal column from the dropdown, or switch to <code>__multi__</code> / <code>__concentration__</code> mode for multi-column analyses.</li>
-          <li>Use the dual-range slider to set the transition window <code>[T_low, T_high]</code> (°C).</li>
-          <li>Adjust the baseline offsets. Folded baseline is fit on <code>[T_low, T_low + lower offset]</code>, unfolded on <code>[T_high − upper offset, T_high]</code>.</li>
-          <li>Set strand concentration (µM) and salt (mM).</li>
-          <li>Click <strong>Run Analysis</strong>. Three Tm estimates are returned: raw (baseline intersection), van't Hoff linearisation, and the full nonlinear two-state fit.</li>
+          <li>Choose the structure type: <em>Heterodimer</em> (two different strands), <em>Homodimer</em> (self-complementary) or <em>Monomer</em> (hairpin).</li>
+          <li>Pick a signal column, or one of the multi-column modes: <code>multi (shared ΔH fit)</code> or <code>concentration series</code>.</li>
+          <li>Enter the oligo concentration C<sub>T</sub> in µM — per strand, required for dimers. In the multi-column modes each column gets its own C<sub>T</sub> pill.</li>
+          <li>Check the baseline windows (see below). Each curve's windows are detected automatically the first time you open it; adjust them if needed.</li>
+          <li>Click <strong>▶ Run analysis</strong>. Three Tm estimates are returned: raw (baseline intersection), van't Hoff linearisation, and the full non-linear two-state fit.</li>
         </ol>
+        <p>If an analysis fails — for example when the fit cannot place the transition inside the fitted temperature range — the reason is shown instead of numbers. Adjust the baseline windows and run again.</p>
+
+        <h3 id="windows">Baseline windows</h3>
+        <p>Four temperatures (°C) define the analysis, set with the four-handle slider or typed into the boxes:</p>
+        <table>
+          <thead><tr><th>Window</th><th>Range</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td>Folded baseline</td><td><code>[fold<sub>lo</sub>, fold<sub>hi</sub>]</code></td><td>linear fit of the low-temperature plateau</td></tr>
+            <tr><td>Unfolded baseline</td><td><code>[unf<sub>lo</sub>, unf<sub>hi</sub>]</code></td><td>linear fit of the high-temperature plateau</td></tr>
+            <tr><td>Fit window</td><td><code>[fold<sub>lo</sub>, unf<sub>hi</sub>]</code></td><td>data used by the full two-state fit</td></tr>
+          </tbody>
+        </table>
+        <ul class="disc">
+          <li>Every curve gets its own windows. They are <strong>detected automatically</strong> the first time a curve is shown: the first column on file load, each column when you select it, and every curve when you enter a multi-column mode. Windows you have set are kept when you come back to a curve.</li>
+          <li>If detection fails, windows at the scan edges are used and an amber warning names the curve. Check those windows; the warning disappears once you edit them.</li>
+          <li><strong>⚙ Auto detect</strong> re-detects the curve being edited. In the multi-column modes, <strong>⚙ Detect all baselines</strong> re-detects every curve; click a C<sub>T</sub> pill to inspect or edit that curve's windows. When re-detection fails, windows you already had are kept.</li>
+        </ul>
+
+        <h3 id="advanced">Advanced settings</h3>
+        <p>The collapsible <strong>Advanced</strong> section holds one set of analysis settings used for every curve. A blank field means the default, shown greyed out.</p>
+        <table>
+          <thead><tr><th>Setting</th><th>Default</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>van't Hoff border</td><td><code>0.15</code></td><td>Fraction of θ trimmed at each end of the van't Hoff regression; larger keeps fewer, more central points (0–0.5).</td></tr>
+            <tr><td>lin_init</td><td><code>10</code></td><td>Number of first / last points averaged to seed the baseline intercepts of the fit.</td></tr>
+            <tr><td>ΔH start, ΔS start</td><td>van't Hoff</td><td>Starting values of the non-linear fit (folding, so negative). ΔS is in cal/(mol·K), like the results. A value you leave blank comes from the van't Hoff estimate.</td></tr>
+            <tr><td>Baseline slopes</td><td><code>physical</code></td><td><code>physical</code>: slopes capped from the data · <code>loose</code>: folded slope ≥ 0 · <code>positive</code>: both ≥ 0 · <code>unbounded</code>: free.</td></tr>
+            <tr><td>Fit strategy</td><td><code>single</code></td><td><code>multistart</code> runs one fit per ΔH seed and keeps the best — slower, but more robust for hard curves. Not used by the multi (shared ΔH) fit.</td></tr>
+          </tbody>
+        </table>
+        <p>Invalid values are reported instead of being silently corrected.</p>
+
+        <h3 id="buttons">Reset to defaults &amp; Clear</h3>
+        <ul class="disc">
+          <li><strong>↺ Reset to defaults</strong> re-detects the windows of the curve being edited, empties the Advanced section, and re-runs. C<sub>T</sub> values are kept.</li>
+          <li><strong>✕ Clear</strong> removes everything — data, concentrations, windows, Advanced settings, results — and returns to the upload screen. It asks for confirmation first.</li>
+        </ul>
 
         <h3 id="modes">Three analysis modes</h3>
         <table>
@@ -150,17 +188,17 @@ tailwind.config = {
             <tr>
               <td><strong>Single column</strong></td>
               <td>any signal column</td>
-              <td>Tm by baseline intersection, van't Hoff linearisation, and a full two-state nonlinear fit. Returns ΔH / ΔS / ΔG / Tm from each method.</td>
+              <td>Tm by baseline intersection, van't Hoff linearisation, and a full two-state non-linear fit. Returns ΔH / ΔS / ΔG / Tm from each method.</td>
             </tr>
             <tr>
               <td><strong>Shared-ΔH multi</strong></td>
-              <td><code>__multi__</code></td>
+              <td><code>multi (shared ΔH fit)</code></td>
               <td>Joint fit across all columns sharing ΔH and ΔS, with independent baselines per column. Each column carries its own concentration.</td>
             </tr>
             <tr>
               <td><strong>Concentration series</strong></td>
-              <td><code>__concentration__</code></td>
-              <td>Extracts three Tm values per column (raw / vH / full fit) and runs <code>1/Tm = (R/ΔH)·ln(C_T/f) + ΔS/ΔH</code> for each. <code>f = 1</code> for homodimers, <code>f = 4</code> for heterodimers.</td>
+              <td><code>concentration series</code></td>
+              <td>Extracts three Tm values per column (raw / vH / full fit) and fits <code>1/Tm = (R/ΔH)·ln(C_T/f) + ΔS/ΔH</code> for each. <code>f = 1</code> for homodimers, <code>f = 4</code> for heterodimers. Not applicable to monomers, whose Tm does not depend on concentration.</td>
             </tr>
           </tbody>
         </table>
@@ -176,235 +214,137 @@ tailwind.config = {
             <tr><td>Reset view</td><td>Click the <code>⤢ reset</code> button in the chart header</td></tr>
           </tbody>
         </table>
-        <p>Zooming and panning act on both axes simultaneously. The shaded analysis-window overlay on the melting-curve plot follows the zoom — useful for inspecting the baseline regions or the steep part of the transition without re-running the fit.</p>
+        <p>Zooming and panning act on both axes simultaneously. The shaded baseline-window overlay on the melting-curve plot follows the zoom — useful for inspecting the baseline regions or the steep part of the transition without re-running the fit.</p>
 
         <h3 id="download">Download results</h3>
-        <p>The <strong>Download CSV</strong> button saves a results file containing a per-column block (raw / vH / full-fit / multi columns) and, for concentration mode, an additional block with the per-curve table and the three regressions.</p>
-      </section>
-
-      <!-- ──────────────── CLI ──────────────── -->
-      <section id="cli">
-        <h2>2. Command-line interface</h2>
-        <p>The same pipeline runs outside the browser for batch / scripted use. The full result dict is printed as JSON on stdout. Pass <code>--csv-out</code> to also write a results CSV in the same format the browser produces.</p>
-
-        <h3 id="cli-run">Running</h3>
-        <p>From the project root, with <code>pandas</code>, <code>numpy</code>, and <code>scipy</code> available:</p>
-<pre><code>python -m rnamelt FILE.csv [options]</code></pre>
-        <p>Installing the package (<code>pip install .</code>) also wires up a console-script alias so you can just run <code>rnamelt FILE.csv</code>. <code>python -m rnamelt --help</code> lists every flag. Exit codes: <code>0</code> on success, <code>1</code> if the analysis returns an error, <code>2</code> on bad input.</p>
-
-        <h3 id="cli-examples">Examples</h3>
-        <p>Default — van't Hoff + full fit on every signal column in the file:</p>
-<pre><code>python -m rnamelt melt.csv --csv-out batch.csv</code></pre>
-
-        <p>Single column:</p>
-<pre><code>python -m rnamelt melt.csv \
-  --column sample_1 --struct-type heterodimer \
-  --oligo 5.0 --T-low 20 --T-high 90 \
-  --csv-out single.csv</code></pre>
-
-        <p>Shared-ΔH fit across columns (defaults to all columns at <code>--oligo</code> when <code>--oligo-multi</code> is omitted):</p>
-<pre><code>python -m rnamelt melt.csv \
-  --column __multi__ --struct-type heterodimer \
-  --oligo-multi sample_1=0.5 \
-  --oligo-multi sample_2=5.0 \
-  --oligo-multi sample_3=50</code></pre>
-
-        <p>Concentration-series van't Hoff (requires <code>--oligo-multi</code> &mdash; varying C<sub>T</sub> is the whole point):</p>
-<pre><code>python -m rnamelt melt.csv \
-  --column __concentration__ --struct-type heterodimer \
-  --oligo-multi sample_1=0.5 \
-  --oligo-multi sample_2=5.0 \
-  --oligo-multi sample_3=50 \
-  --csv-out conc.csv</code></pre>
-
-        <h3 id="cli-flags">Flags</h3>
-        <table>
-          <thead><tr><th>Flag</th><th>Default</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td><code>csv</code> <span class="text-muted">(positional)</span></td><td>—</td><td>CSV path</td></tr>
-            <tr><td><code>--column</code></td><td>(omit &rarr; all columns)</td><td>Run single-mode (vH + full fit) on every signal column when omitted. Pass a column name for one column, <code>__multi__</code> for shared-ΔH joint fit, or <code>__concentration__</code> for the 1/Tm vs ln(C<sub>T</sub>/f) series.</td></tr>
-            <tr><td><code>--struct-type</code></td><td><code>heterodimer</code></td><td><code>heterodimer</code> · <code>homodimer</code> · <code>monomer</code></td></tr>
-            <tr><td><code>--signal-type</code></td><td><code>absorbance</code></td><td><code>absorbance</code> · <code>fluorescence</code></td></tr>
-            <tr><td><code>--T-low</code> / <code>--T-high</code></td><td>data range</td><td>Transition window (°C)</td></tr>
-            <tr><td><code>--bl-lower</code> / <code>--bl-upper</code></td><td><code>10</code></td><td>Baseline offsets (°C)</td></tr>
-            <tr><td><code>--salt</code></td><td><code>150</code></td><td>NaCl in mM</td></tr>
-            <tr><td><code>--oligo</code></td><td><code>0.5</code></td><td>Single-column strand concentration (µM)</td></tr>
-            <tr><td><code>--oligo-multi NAME=VAL</code></td><td>—</td><td>Repeatable per-column µM for multi / concentration modes</td></tr>
-            <tr><td><code>--csv-out</code></td><td>—</td><td>Write a results CSV</td></tr>
-            <tr><td><code>--indent</code></td><td><code>2</code></td><td>JSON indent (<code>0</code> = compact)</td></tr>
-          </tbody>
-        </table>
-
-        <p class="mt-3">Three solver-tuning groups override the in-browser defaults (<code>rnamelt.SOLVER_DEFAULTS</code>, <code>VH_DEFAULTS</code>, <code>FIT_INIT_DEFAULTS</code>). Pass any subset; unset flags fall back to defaults.</p>
-        <table>
-          <thead><tr><th>Group</th><th>Flags</th></tr></thead>
-          <tbody>
-            <tr><td><code>scipy.optimize.least_squares</code></td><td><code>--max-nfev</code>, <code>--ftol</code>, <code>--gtol</code>, <code>--xtol</code>, <code>--method</code>, <code>--loss</code>, <code>--f-scale</code>, <code>--jac</code>, <code>--solver-verbose</code>, <code>--residuals-method</code></td></tr>
-            <tr><td>van't Hoff linearisation</td><td><code>--vh-border</code>, <code>--vh-t1-min</code>, <code>--vh-t1-max</code>, <code>--vh-T-scale</code></td></tr>
-            <tr><td>full-fit initial guesses</td><td><code>--dH-init</code>, <code>--dS-init</code>, <code>--lin-init</code></td></tr>
-          </tbody>
-        </table>
+        <p><strong>⬇ Download results CSV</strong> saves a results file containing a per-column block (raw / vH / full-fit / multi columns) and, for concentration mode, an additional block with the per-curve table and the three regressions. <strong>⬇ Download plots (SVG)</strong> saves each visible chart as a vector SVG image, as shown, including the current zoom. SVG files open in Inkscape, Illustrator or a browser, and stay sharp at any size. Text uses standard system fonts, so tick labels can look slightly different from the page.</p>
       </section>
 
       <!-- ──────────────── PYTHON API ──────────────── -->
       <section id="api">
-        <h2>3. Python API</h2>
-        <p>Install from source:</p>
-<pre><code>pip install .                # base — pandas / numpy / scipy
-pip install '.[plots]'       # also pulls matplotlib for .plot() helpers</code></pre>
-        <p>The recommended surface is the <code>MeltAnalysis</code> class. It holds the DataFrame plus every solver / van't Hoff / fit-init knob, and exposes the three modes as methods that return typed result objects from <code>rnamelt.results</code>. The thin functional wrappers (<code>analyze_single</code>, …) are kept for back-compat and also documented below.</p>
+        <h2>2. Python API</h2>
+        <p>The browser runs the <code>rnamelt</code> Python package; the same analyses are available as a library:</p>
+<pre><code>pip install rnamelt              # base — numpy / pandas / scipy
+pip install 'rnamelt[plots]'     # also pulls matplotlib for rnamelt.plots</code></pre>
 
-        <h3 id="api-class">MeltAnalysis class</h3>
-<pre><code>from rnamelt import MeltAnalysis, FitFailed
+        <h3 id="api-single">SingleCurve — one melting curve</h3>
+<pre><code>import pandas as pd
+from rnamelt import SingleCurve
 
-m = MeltAnalysis.from_csv(
-    "melt.csv",
-    struct_type="heterodimer",   # "heterodimer" | "homodimer" | "monomer"
-    salt=150.0,                  # NaCl (mM) — metadata only
-    T_low=None, T_high=None,     # transition window (°C); None = full range
-    bl_lower_offset=10.0,        # folded-baseline span above T_low (°C)
-    bl_upper_offset=10.0,        # unfolded-baseline span below T_high (°C)
-    solver=None,                 # dict — overrides rnamelt.SOLVER_DEFAULTS
-    vh=None,                     # dict — overrides rnamelt.VH_DEFAULTS
-    fit_init=None,               # dict — overrides rnamelt.FIT_INIT_DEFAULTS
+df = pd.read_csv("melt.csv")
+T  = df.iloc[:, 0].to_numpy(float)
+
+c = SingleCurve(
+    T, df["sample_1"].to_numpy(float),
+    name="sample_1",
+    oligoC=0.5,                   # per-strand concentration, µM (required for dimers)
+    struct_type="heterodimer",    # "heterodimer" | "homodimer" | "monomer"
 )
 
-print(m.signal_columns)          # ['F4', 'F5', ...]
-m.configure(salt=1000.0)         # chainable in-place reconfiguration
-m2 = m.copy()                    # independent fork</code></pre>
+r  = c.raw_tm()      # RawTm      — Tm where the mean baseline crosses the data
+vh = c.vant_hoff()   # VanHoffFit — linear fit of ln K vs 1/T
+f  = c.fit()         # SingleFit  — non-linear fit of the full two-state model
 
-        <p><strong>Single column</strong> — returns a <code>SingleResult</code>:</p>
-<pre><code>r = m.single("F4", oligo=0.5)    # oligo in µM
-r.Tm_raw, r.vh.dH, r.fit.Tm, r.fit.dG
-len(r.fit.curve)                 # numpy arrays live on the result
+if f.ok:
+    print(f.dH, f.dS, f.dG, f.Tm)
+else:
+    print(f.error)</code></pre>
+        <p>Data and concentration are all a default run needs. Baseline windows are detected automatically, and the fit is seeded from the van't Hoff estimate.</p>
 
-try:
-    r.fit.require()              # raises FitFailed if not r.fit.ok
-except FitFailed as e:
-    print(e)
+        <h3 id="api-windows">Baseline windows</h3>
+<pre><code>c = SingleCurve(T, signal, oligoC=0.5,
+                fold_low_T=15, fold_high_T=35, unf_low_T=70, unf_high_T=90)</code></pre>
+        <p>Give all four temperatures or none; they must satisfy <code>fold_low_T &lt; fold_high_T ≤ unf_low_T &lt; unf_high_T</code>. When omitted they are detected (<code>c.window_source == "auto"</code>); if detection fails, edge windows of <code>windows["fallback_width"]</code> °C are used and a <code>BaselineWarning</code> is issued (<code>"fallback"</code>). <code>c.auto_baselines()</code> returns the detected windows without changing the curve.</p>
 
-r.to_dict()       # legacy orchestrator dict (browser-shape)
-r.to_dataframe()  # 1-row tidy summary
-r.to_csv("out.csv")</code></pre>
+        <h3 id="api-multi">MultiCurves — several curves</h3>
+<pre><code>from rnamelt import SingleCurve, MultiCurves
 
-        <p><strong>Shared-ΔH multi fit</strong> — returns a <code>MultiResult</code>:</p>
-<pre><code>oligo_multi = {"F4": 0.5, "F5": 1.0, "F6": 2.0, "F7": 4.0}
-multi = m.multi(oligo_multi)
-multi.dH, multi.dS, multi.dG     # shared ΔH/ΔS/ΔG
-for c in multi.columns:
-    print(c.name, c.Tm_fit, c.oligoC)</code></pre>
+oligos = {"s1": 0.5, "s2": 5.0, "s3": 50.0}
+m = MultiCurves([SingleCurve(T, df[col].to_numpy(float), name=col, oligoC=o)
+                 for col, o in oligos.items()])
 
-        <p><strong>Concentration-series van't Hoff</strong> — returns a <code>ConcentrationResult</code> with three regressions:</p>
-<pre><code>conc = m.concentration(oligo_multi)
-for s in (conc.series_raw, conc.series_vh, conc.series_fit):
+gf = m.global_fit()          # GlobalFit — shared ΔH/ΔS, baselines per curve
+gf.dH, gf.dS, gf.dG
+for cc in gf.curves:         # GlobalFitCurve
+    print(cc.name, cc.oligoC, cc.Tm)
+
+cdr = m.conc_dependency()    # ConcDepResult — 1/Tm vs ln(C_T/f)
+for s in (cdr.series_raw, cdr.series_vh, cdr.series_fit):
     if s.ok:
-        print(s.dH, s.dG_37, s.r_squared)
-conc.per_curve, conc.skipped</code></pre>
+        print(s.method, s.dH, s.dS, s.dG, s.r_squared)
+cdr.per_curve, cdr.skipped</code></pre>
+        <p>Each curve keeps its own concentration, windows and settings, and curves may differ in length. All curves must share one <code>struct_type</code>.</p>
 
-        <p><strong>Every column at once</strong>:</p>
-<pre><code>batch = m.single_all(oligo=0.5)  # dict[str, SingleResult]
-{name: r.fit.Tm for name, r in batch.items() if r.fit and r.fit.ok}</code></pre>
+        <h3 id="api-settings">Settings</h3>
+        <p>Every tunable default lives in one dict exported from <code>rnamelt</code>:</p>
+        <table>
+          <thead><tr><th>Argument</th><th>Defaults</th><th>Controls</th></tr></thead>
+          <tbody>
+            <tr><td><code>windows</code></td><td><code>WINDOW_DEFAULTS</code></td><td><code>detector</code> options for baseline detection, <code>fallback_width</code></td></tr>
+            <tr><td><code>solver</code></td><td><code>SOLVER_DEFAULTS</code></td><td><code>scipy.optimize.least_squares</code> options: <code>max_nfev</code>, tolerances, <code>loss</code>, <code>f_scale</code>, <code>x_scale</code>, …</td></tr>
+            <tr><td><code>vh</code></td><td><code>VH_DEFAULTS</code></td><td>van't Hoff: <code>border</code> (θ range kept), <code>t1_min</code> / <code>t1_max</code>, <code>T_scale</code></td></tr>
+            <tr><td><code>fit_init</code></td><td><code>FIT_INIT_DEFAULTS</code></td><td>starting values: <code>seed_from</code>, <code>dH_init</code>, <code>dS_init</code>, <code>lin_init</code>, <code>b1_init</code>, <code>b2_init</code>, fallbacks and plausible ranges</td></tr>
+            <tr><td><code>bounds</code></td><td><code>BOUNDS_DEFAULTS</code></td><td><code>mode</code> (baseline slopes: <code>physical</code> · <code>loose</code> · <code>positive</code> · <code>unbounded</code>), <code>dH</code> / <code>dS</code> boxes, <code>slope_cap_k</code>, <code>Tm_margin</code></td></tr>
+            <tr><td><code>multistart</code></td><td><code>MULTISTART_DEFAULTS</code></td><td><code>dH_seeds</code>, <code>fwhm_factors</code>, <code>seed_Tm_K</code>, <code>min_abs_dH</code></td></tr>
+            <tr><td><code>raw</code></td><td><code>RAW_DEFAULTS</code></td><td><code>edge_skip</code> for the raw-Tm crossing search</td></tr>
+          </tbody>
+        </table>
+        <p>Pass a partial dict <strong>per curve</strong> (validated when the curve is built — typos raise <code>ValueError</code>) or <strong>per call</strong> (applies to that call only):</p>
+<pre><code>c = SingleCurve(T, signal, oligoC=0.5, vh={"border": 0.2}, bounds={"mode": "loose"})
 
-        <h3 id="api-arrays">From raw arrays — no CSV</h3>
-        <p><code>MeltAnalysis.from_arrays</code> bypasses the CSV layer. <code>signals</code> accepts three shapes:</p>
-<pre><code>import numpy as np
-from rnamelt import MeltAnalysis
+c.fit(solver={"max_nfev": 500})
+c.fit(bounds_mode="unbounded")          # shortcut for bounds={"mode": ...}
+c.fit(strategy="multistart")            # one fit per dH seed, lowest RMS wins
+c.vant_hoff(vh={"t1_min": 2.9, "t1_max": 3.1})
 
-T = np.linspace(20, 90, 71)
+m.conc_dependency(fit_init={"seed_from": "user", "dH_init": -100, "dS_init": -0.28})
+m.global_fit(bounds={"dH": (-250, 0)})</code></pre>
+        <p>In <code>global_fit</code>, the settings that define the shared ΔH/ΔS — the solver, <code>seed_from</code>, and the dH/dS starting values, fallbacks and boxes — must agree across curves. A conflict raises <code>ValueError</code> naming the setting; passing it in the call resolves it.</p>
 
-# (1) 1D array — single column, auto-named "signal_1"
-m = MeltAnalysis.from_arrays(T, signal_F4)
+        <h3 id="api-seeds">Starting values</h3>
+        <p>The dH / dS starting values follow <code>fit_init["seed_from"]</code>:</p>
+        <table>
+          <thead><tr><th>seed_from</th><th>Starting values</th></tr></thead>
+          <tbody>
+            <tr><td><code>"auto"</code></td><td>your <code>dH_init</code> / <code>dS_init</code> where given, else van't Hoff, else the fallbacks</td></tr>
+            <tr><td><code>"vh"</code></td><td>van't Hoff, else the fallbacks (ignores <code>dH_init</code> / <code>dS_init</code>)</td></tr>
+            <tr><td><code>"user"</code></td><td><code>dH_init</code> and <code>dS_init</code> (both required)</td></tr>
+            <tr><td><code>"fallback"</code></td><td><code>dH_fallback</code> / <code>dS_fallback</code>, without running van't Hoff</td></tr>
+          </tbody>
+        </table>
+        <p>The van't Hoff dH and dS are used as a pair: if either falls outside its plausible range, both fall back. <code>SingleFit.seed</code> and <code>GlobalFit.seed</code> report the values used and where each came from.</p>
 
-# (2) Mapping {name: 1D array} — names preserved
-m = MeltAnalysis.from_arrays(T, {"F4": sigF4, "F5": sigF5})
-
-# (3) 2D array (rows=T, cols=signals), optional `names=`
-m = MeltAnalysis.from_arrays(T, arr2d, names=["A", "B", "C"])</code></pre>
-        <p>All signal arrays must match the temperature length. Other keyword arguments forward to <code>MeltAnalysis.__init__</code>.</p>
+        <h3 id="api-results">Results</h3>
+        <p>Every analysis returns a NamedTuple from <code>rnamelt.results</code>: <code>RawTm</code>, <code>VanHoffFit</code>, <code>SingleFit</code>, <code>GlobalFit</code> (holds <code>GlobalFitCurve</code>s) and <code>ConcDepResult</code> (holds <code>ConcentrationCurve</code>s and three <code>ConcentrationSeries</code>). A failed analysis is <strong>returned, not raised</strong>: <code>ok</code> is <code>False</code> and <code>error</code> says why — check <code>ok</code> before reading values.</p>
+        <ul class="disc">
+          <li><code>converged = False</code>: the solver stopped at <code>max_nfev</code>. The best result is returned anyway, with a <code>ConvergenceWarning</code>.</li>
+          <li>A fit whose model Tm lies more than <code>bounds["Tm_margin"]</code> (3 °C) outside the fitted temperature range did not find the transition and is returned with <code>ok = False</code>.</li>
+        </ul>
+        <p>Units: ΔH in kcal/mol, ΔS in kcal/(mol·K), ΔG in kcal/mol at 37 °C, Tm in °C (<code>ConcentrationCurve</code> also gives <code>Tm_*_K</code> in K), C<sub>T</sub> (<code>c0</code>) in M, <code>oligoC</code> in µM, baselines as <code>(slope, intercept)</code>.</p>
 
         <h3 id="api-plotting">Plotting <span class="text-muted text-sm">(optional — needs matplotlib)</span></h3>
-        <p>Each result class has a <code>.plot()</code> method that lazy-imports <code>rnamelt.plots</code> (matplotlib stays out of the base install so the browser bundle is unaffected).</p>
-<pre><code>import matplotlib
-matplotlib.use("Agg")                    # headless backend
-import matplotlib.pyplot as plt
+        <p>matplotlib is only imported by <code>rnamelt.plots</code>, so the browser bundle never loads it.</p>
+<pre><code>from rnamelt import plots
 
-# SingleResult — 3-panel: raw + baselines / van't Hoff / full fit
-fig, axes = m.single("F4").plot(figsize=(15, 5))
-fig.savefig("single.png", dpi=120); plt.close(fig)
-
-# Convenience shortcut on the analyzer
-fig, axes, result = m.plot("F4")         # single(column).plot()
-
-# MultiResult — all column curves + shared-ΔH fits on one axis
-fig, ax = m.multi(oligo_multi).plot(figsize=(10, 6))
-
-# ConcentrationResult — overlay + 1/Tm vs ln(C_T/f)
-fig, axes = m.concentration(oligo_multi).plot(figsize=(13, 5))</code></pre>
-
-        <h3 id="api-functions">Functional helpers</h3>
-        <p>Thin wrappers kept for backwards compatibility. Each takes a cleaned <code>pandas.DataFrame</code> and returns the legacy dict.</p>
-<pre><code>import pandas as pd
-from rnamelt import (
-    analyze_single, analyze_multi, analyze_concentration, analyze_csv,
-)
-from rnamelt.cleaning import clean
-
-df = clean(pd.read_csv("melt.csv"))
-
-analyze_single(df, "sample_1", struct_type="heterodimer", oligo=0.5)
-analyze_multi(df, {"sample_1": 0.5, "sample_2": 5.0})
-analyze_concentration(df, {"sample_1": 0.5, "sample_2": 5.0})
-
-# read_csv + clean + dispatch in one call
-analyze_csv("melt.csv", mode="single", column="sample_1", oligo=0.5)
-analyze_csv("melt.csv", mode="concentration",
-            oligo_multi={"sample_1": 0.5, "sample_2": 5.0})</code></pre>
-
-        <h3 id="api-result">Result dict shape</h3>
-        <p><code>SingleResult.to_dict()</code> (and <code>analyze_single</code>) return the same dict the in-browser pipeline produces:</p>
-<pre><code>{
-  "name": "sample_1",
-  "TmRaw": 52.5,
-  "vantHoff":   {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_vH": ...,
-                 "fit_vh": (slope, intercept), ...},
-  "fit_result": {"success": True, "dH": ..., "dS": ..., "dG": ..., "T_m_fit": ...,
-                 "fit": [...], "derivative": [...],
-                 "base_b_f": (m, b), "base_ub_f": (m, b)},
-  "T_used": [...], "signal": [...],
-  "base_b_r": (m, b), "base_ub_r": (m, b),
-  ...
-}</code></pre>
-
-        <p><strong>Concentration mode</strong>:</p>
-<pre><code>{
-  "is_concentration":   True,
-  "self_complementary": False,
-  "per_curve": [
-    {"name": ..., "TmRaw": ..., "TmvH": ..., "Tmfit": ..., "lnCT": ..., ...},
-    ...
-  ],
-  "series": {
-    "raw": {"dH": ..., "dS": ..., "dG_37": ..., "r_squared": ...,
-            "slope": ..., "intercept": ..., ...},
-    "vh":  {...},
-    "fit": {...},
-  },
-  "skipped": [{"name": ..., "reason": ...}, ...],
-}</code></pre>
-        <p>ΔH is in kcal/mol, ΔS in kcal/(mol·K), Tm in °C (Kelvin variants suffixed <code>_K</code>). The typed result objects (<code>SingleResult</code>, <code>MultiResult</code>, <code>ConcentrationResult</code>, …) live in <code>rnamelt.results</code> and expose the same fields as attributes — numpy arrays stay as numpy arrays instead of being JSON-flattened.</p>
+fig, axes = plots.plot_single(c)                       # raw / van't Hoff / fit
+fig, ax   = plots.plot_multi(m.global_fit())
+fig, axes = plots.plot_concentration(m.conc_dependency())</code></pre>
       </section>
 
       <!-- ──────────────── MODEL ──────────────── -->
       <section id="model">
-        <h6>Two-state model</h6>
-        <p>The observed signal is a linear combination of folded and unfolded baselines, weighted by the fraction unfolded θ(T):</p>
+        <h2>3. Two-state model</h2>
+        <p>The observed signal is a mix of the folded and unfolded baselines, weighted by the folded fraction θ(T):</p>
         <div class="formula">
-          A(T) = (m<sub>F</sub>·T + b<sub>F</sub>)·(1 − θ) + (m<sub>U</sub>·T + b<sub>U</sub>)·θ<br>
-          K(T) = exp(−ΔG / RT),    ΔG = ΔH − T·ΔS<br>
-          θ    = K / (1 + K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(monomer)</span><br>
-          θ    = (√(1 + 8·c<sub>0</sub>·K) − 1) / (4·c<sub>0</sub>·K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(dimer)</span>
+          A(T) = (m<sub>1</sub>·T + b<sub>1</sub>)·θ + (m<sub>2</sub>·T + b<sub>2</sub>)·(1 − θ)<br>
+          ΔG = ΔH − T·ΔS,    K = exp(−ΔG / RT)<br>
+          θ = K / (1 + K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(monomer)</span><br>
+          θ = (s − 1) / (s + 1),  s = √(1 + 2·C<sub>T</sub>·K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(heterodimer)</span><br>
+          θ = (s − 1) / (s + 1),  s = √(1 + 8·C<sub>T</sub>·K) &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-muted">(homodimer)</span><br>
+          T<sub>m</sub> = ΔH / (ΔS + R·ln(C<sub>T</sub>/f)),  f = 4 (hetero), 1 (homo);  T<sub>m</sub> = ΔH / ΔS (monomer)
         </div>
-        <p>Units throughout: ΔH in kcal/mol, ΔS in kcal/(mol·K), T in K (<code>T_K = T_C − T0</code>, with <code>T0 = −273.15</code>).</p>
+        <p>ΔH, ΔS and ΔG refer to <strong>folding</strong>, so ΔH and ΔS are negative for a stable duplex. C<sub>T</sub> is the total strand concentration: 2 × the per-strand concentration for a heterodimer, 1 × for a homodimer.</p>
+        <p>Units: ΔH in kcal/mol, ΔS in kcal/(mol·K), ΔG in kcal/mol at 37 °C. Tm is reported in °C; the model works in K (<code>T_K = T_C + 273.15</code>).</p>
       </section>
 
       <footer class="mt-12 pt-6 border-t border-border text-xs text-muted">

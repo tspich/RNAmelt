@@ -70,6 +70,16 @@ def _check_seeds_in_bounds(init, bnd):
             )
 
 
+def _check_window_order(windows_T, what):
+    """Raise unless fold_low_T < fold_high_T <= unf_low_T < unf_high_T."""
+    fl, fh, ul, uh = windows_T
+    if not (np.all(np.isfinite(windows_T)) and fl < fh <= ul < uh):
+        raise ValueError(
+            f"{what} must satisfy fold_low_T < fold_high_T <= "
+            f"unf_low_T < unf_high_T; got {tuple(windows_T)}"
+        )
+
+
 def _check_detector_kwargs(kwargs):
     """Reject options that auto_baseline.find_baselines doesn't take."""
     unknown = sorted(set(kwargs) - _DETECTOR_KEYS)
@@ -230,6 +240,7 @@ class SingleCurve:
         else:
             try:
                 windows_T = self.auto_baselines(**self.windows["detector"])
+                _check_window_order(windows_T, "detected windows")
                 self.window_source = "auto"
             except Exception as e:
                 windows_T = self._edge_windows()
@@ -239,12 +250,7 @@ class SingleCurve:
                     f"windows of {windows_T[1] - windows_T[0]:g} °C at each scan edge",
                     methods.BaselineWarning, stacklevel=2,
                 )
-        fl, fh, ul, uh = windows_T
-        if not (np.all(np.isfinite(windows_T)) and fl < fh <= ul < uh):
-            raise ValueError(
-                f"baseline windows must satisfy fold_low_T < fold_high_T <= "
-                f"unf_low_T < unf_high_T; got {windows_T}"
-            )
+        _check_window_order(windows_T, "baseline windows")
         self.fold_low_T, self.fold_high_T, self.unf_low_T, self.unf_high_T = windows_T
 
     def _edge_windows(self) -> tuple[float, float, float, float]:
@@ -429,8 +435,7 @@ class SingleCurve:
 
         def _run_one(dH0, dS0, seed_info):
             try:
-                (dG_37, dH, dS, Tm, ym, base_b, base_ub, base_med,
-                 converged) = methods.fit_full_function(
+                (dG_37, dH, dS, Tm, ym, base_b, base_ub, base_med, converged) = methods.fit_full_function(
                     TT, y,
                     c0          = self.c0,
                     dH_init     = dH0,

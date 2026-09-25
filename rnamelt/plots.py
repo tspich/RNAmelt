@@ -324,7 +324,7 @@ def energy_params(axs, x, y, dG_37, dH, dS):
 
 
 def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5)):
-    """Render a `SingleResult` as a 3-panel figure: raw / van't Hoff / fit.
+    """Render a `SingleCurve` as a 3-panel figure: raw / van't Hoff / fit.
 
     Pass `axes` (length-3 sequence of Axes) to draw into existing axes;
     otherwise a new figure is created. Returns `(fig, axes)`.
@@ -407,7 +407,7 @@ def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5
 
 
 def plot_multi(result, *, ax=None, figsize=(6, 4)):
-    """Render a `MultiResult` (shared-ΔH joint fit) onto one panel.
+    """Render a `GlobalFit` (shared-ΔH joint fit) onto one panel.
 
     Each column gets a raw line + dashed fit in the same colour.
     Returns `(fig, ax)`.
@@ -449,7 +449,7 @@ def plot_multi(result, *, ax=None, figsize=(6, 4)):
 
 
 def plot_concentration(result, *, axes=None, figsize=(13, 5), legend=True):
-    """Render a `ConcentrationResult` as 2 panels: curves + 1/Tm vs ln(C_T/f).
+    """Render a `ConcDepResult` as 2 panels: curves + 1/Tm vs ln(C_T/f).
 
     Panel 1 overlays all per-curve raw signals with their fit-Tm markers.
     Panel 2 plots the three van't Hoff regressions (raw / vH / fit).
@@ -501,7 +501,7 @@ def plot_concentration(result, *, axes=None, figsize=(13, 5), legend=True):
 
 
 def plot_conc(result, *, ax=None, figsize=(13, 5), legend=True):
-    """Render a `ConcentrationResult` as 1 panel: 1/Tm vs ln(C_T/f).
+    """Render a `ConcDepResult` as 1 panel: 1/Tm vs ln(C_T/f).
 
     Returns `(fig, axes)`.
     """
