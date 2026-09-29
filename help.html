@@ -203,6 +203,8 @@ tailwind.config = {
           </tbody>
         </table>
 
+        <p>The two-state fit of a single curve, the multi fit and the concentration series show <strong>± standard errors</strong> for ΔH, ΔS and ΔG (and for the fitted Tm of a single curve). The van't Hoff estimate and the raw Tm of a single curve have none. They include the ΔH–ΔS correlation, which makes the ΔG error much smaller than the ΔH and ΔS errors suggest. A concentration series needs at least 3 curves for an error, and a parameter held at a fit bound has none; a note then says why. The errors reflect measurement noise only, not the choice of baseline windows — comparing the three series and the multi fit gives a sense of that.</p>
+
         <h3 id="charts">Chart interactions</h3>
         <p>All three plots (melting curve, van't Hoff / concentration regression, derivative) are interactive:</p>
         <table>
@@ -318,6 +320,7 @@ m.global_fit(bounds={"dH": (-250, 0)})</code></pre>
         <p>Every analysis returns a NamedTuple from <code>rnamelt.results</code>: <code>RawTm</code>, <code>VanHoffFit</code>, <code>SingleFit</code>, <code>GlobalFit</code> (holds <code>GlobalFitCurve</code>s) and <code>ConcDepResult</code> (holds <code>ConcentrationCurve</code>s and three <code>ConcentrationSeries</code>). A failed analysis is <strong>returned, not raised</strong>: <code>ok</code> is <code>False</code> and <code>error</code> says why — check <code>ok</code> before reading values.</p>
         <ul class="disc">
           <li><code>converged = False</code>: the solver stopped at <code>max_nfev</code>. The best result is returned anyway, with a <code>ConvergenceWarning</code>.</li>
+          <li><code>SingleFit</code>, <code>GlobalFit</code> and each <code>ConcentrationSeries</code> carry standard errors <code>SE_dH</code>, <code>SE_dS</code>, <code>SE_dG</code> and <code>cov_dH_dS</code> (<code>SingleFit</code> also <code>SE_Tm</code>) — from the fit covariance s²·(JᵀJ)⁻¹, or from the scatter about the regression line (needs ≥ 3 curves). The ΔG error includes the ΔH–ΔS covariance. When undefined (2 curves, ΔH / ΔS at a bound) they are <code>None</code> and <code>SE_note</code> says why.</li>
           <li>A fit whose model Tm lies more than <code>bounds["Tm_margin"]</code> (3 °C) outside the fitted temperature range did not find the transition and is returned with <code>ok = False</code>.</li>
         </ul>
         <p>Units: ΔH in kcal/mol, ΔS in kcal/(mol·K), ΔG in kcal/mol at 37 °C, Tm in °C (<code>ConcentrationCurve</code> also gives <code>Tm_*_K</code> in K), C<sub>T</sub> (<code>c0</code>) in M, <code>oligoC</code> in µM, baselines as <code>(slope, intercept)</code>.</p>

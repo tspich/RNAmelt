@@ -145,22 +145,35 @@ def full_function_multi_res(x, temps, ys, **kwargs):
 _K_AT_TM_FACTOR = {"heterodimer": 4.0, "homodimer": 1.0}
 
 
+def _tm_denominator(dS, c0, struct_type):
+    """ΔS + R·ln(c0/f) (ΔS for a monomer): Tm_K = ΔH / this."""
+    if struct_type == 'monomer':
+        return dS
+    if struct_type in _K_AT_TM_FACTOR:
+        return dS + constants.R * np.log(c0 / _K_AT_TM_FACTOR[struct_type])
+    raise ValueError(
+        f"unknown struct_type {struct_type!r}; "
+        f"valid: 'heterodimer', 'homodimer', 'monomer'"
+    )
+
+
 def tm_from_therm(dH, dS, c0=1e-6, struct_type='heterodimer'):
     """Model melting temperature (°C) where the folded fraction θ is 1/2.
 
     dH in kcal/mol, dS in kcal/(mol·K), c0 = total strand concentration (M).
     Solves ΔH − Tm·ΔS = −R·Tm·ln K(Tm) for Tm.
     """
-    if struct_type == 'monomer':
-        denom = dS
-    elif struct_type in _K_AT_TM_FACTOR:
-        denom = dS + constants.R * np.log(c0 / _K_AT_TM_FACTOR[struct_type])
-    else:
-        raise ValueError(
-            f"unknown struct_type {struct_type!r}; "
-            f"valid: 'heterodimer', 'homodimer', 'monomer'"
-        )
-    return dH / denom + constants.T0
+    return dH / _tm_denominator(dS, c0, struct_type) + constants.T0
+
+
+def tm_error(dH: float, dS: float, cov_HS, c0: float = 1e-6,
+             struct_type: str = 'heterodimer') -> float:
+    """Standard error (°C = K) of the model Tm from the 2×2 covariance of
+    (ΔH [kcal/mol], ΔS [kcal/(mol·K)]), by the delta method on
+    Tm = ΔH / D with D = ΔS + R·ln(c0/f)."""
+    D = _tm_denominator(dS, c0, struct_type)
+    g = np.array([1.0 / D, -dH / D**2])
+    return float(np.sqrt(max(g @ np.asarray(cov_HS, dtype=float) @ g, 0.0)))
 
 
 def theta_from_therm(T, dH, dS, c0 = 1e-6):
@@ -181,4 +194,23 @@ def theta_from_therm_mono(T, dH, dS):
     return np.exp(- dG / (constants.R * tt))/(1+np.exp(- dG / (constants.R * tt)))
 
 
+def thermo_cov_from_regression(slope: float, intercept: float, cov_ab) -> np.ndarray:
+    """2×2 covariance of (ΔH [kcal/mol], ΔS [kcal/(mol·K)]) from the covariance
+    of slope a and intercept b of 1/Tm = a·ln(C_T/f) + b (delta method on
+    ΔH = R/a, ΔS = R·b/a)."""
+    a, b, R = float(slope), float(intercept), constants.R
+    J = np.array([[-R / a**2,      0.0],
+                  [-R * b / a**2,  R / a]])
+    return J @ np.asarray(cov_ab, dtype=float) @ J.T
 
+
+def thermo_errors(cov_HS, T_C: float = 37.0) -> tuple[float, float, float]:
+    """Standard errors (ΔH, ΔS, ΔG at T_C °C) from the 2×2 covariance of
+    (ΔH [kcal/mol], ΔS [kcal/(mol·K)]). The ΔG error keeps the ΔH–ΔS
+    covariance: var(ΔG) = var(ΔH) + T²·var(ΔS) − 2T·cov(ΔH, ΔS)."""
+    cov = np.asarray(cov_HS, dtype=float)
+    T_K = T_C - constants.T0
+    var_G = cov[0, 0] + T_K**2 * cov[1, 1] - 2 * T_K * cov[0, 1]
+    return (float(np.sqrt(max(cov[0, 0], 0.0))),
+            float(np.sqrt(max(cov[1, 1], 0.0))),
+            float(np.sqrt(max(var_G, 0.0))))

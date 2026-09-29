@@ -26,6 +26,9 @@ Units
     dS         kcal/(mol K)
     dG         kcal/mol at 37 C
     Tm         degrees C — ConcentrationCurve also exposes Tm_*_K in Kelvin
+    SE_*       standard errors, same units as the value; cov_dH_dS in
+               kcal²/(mol²·K). None when undefined, SE_note says why
+               (it may also carry a caveat alongside values)
     c0         M, total strand concentration
     oligoC     uM, per-strand concentration
     baselines  (slope, intercept), signal units per degree C
@@ -89,6 +92,13 @@ class SingleFit(NamedTuple):
     # Starting values actually used: {"dH", "dS", "dH_from", "dS_from"},
     # *_from in {"user", "vh", "fallback", "multistart"}.
     seed:       Optional[dict]                = None
+    # Standard errors from s²·(JᵀJ)⁻¹ at the solution (measurement noise only)
+    SE_dH:      Optional[float]               = None
+    SE_dS:      Optional[float]               = None
+    SE_dG:      Optional[float]               = None
+    SE_Tm:      Optional[float]               = None
+    cov_dH_dS:  Optional[float]               = None
+    SE_note:    Optional[str]                 = None
 
     def __repr__(self) -> str:
         if self.ok:
@@ -122,6 +132,12 @@ class GlobalFit(NamedTuple):
     error:   Optional[str]            = None
     converged: bool                   = True   # False: stopped at max_nfev
     seed:      Optional[dict]         = None   # see SingleFit.seed
+    # Standard errors from s²·(JᵀJ)⁻¹ at the solution (measurement noise only)
+    SE_dH:     Optional[float]        = None
+    SE_dS:     Optional[float]        = None
+    SE_dG:     Optional[float]        = None
+    cov_dH_dS: Optional[float]        = None
+    SE_note:   Optional[str]          = None
 
     def __repr__(self) -> str:
         if self.error:
@@ -197,6 +213,12 @@ class ConcentrationSeries(NamedTuple):
     inv_tm:      Optional[np.ndarray] = None
     ln_ct_line:  Optional[np.ndarray] = None
     inv_tm_line: Optional[np.ndarray] = None
+    # Standard errors from the scatter about the line (need n >= 3)
+    SE_dH:       Optional[float]      = None
+    SE_dS:       Optional[float]      = None
+    SE_dG:       Optional[float]      = None
+    cov_dH_dS:   Optional[float]      = None
+    SE_note:     Optional[str]        = None
 
 class ConcDepResult(NamedTuple):
     """Return value of `MultiCurves.conc_dependency()`. ``ok`` is True when

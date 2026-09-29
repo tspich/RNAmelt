@@ -507,10 +507,28 @@ def vant_hoff_concentration(
     dS = intercept * dH
     dG_37 = dH - (37.0 - constants.T0) * dS
 
+    # Standard errors from the scatter of the points about the line; with
+    # two points the line is exact and the error undefined.
+    n = tm.size
+    if n > 2:
+        x_mean = ln_ct.mean()
+        s_xx = float(np.sum((ln_ct - x_mean) ** 2))
+        resid = inv_tm - (slope * ln_ct + intercept)
+        s2 = float(resid @ resid) / (n - 2)
+        var_a = s2 / s_xx
+        cov_ab = np.array([[var_a,           -x_mean * var_a],
+                           [-x_mean * var_a, s2 / n + x_mean**2 * var_a]])
+        errors = _thermo_error_fields(
+            functions.thermo_cov_from_regression(slope, intercept, cov_ab), None)
+    else:
+        errors = _thermo_error_fields(
+            None, "2 points fit the line exactly: no degrees of freedom for an error")
+
     return {
         "dH":             float(dH),
         "dS":             float(dS),
         "dG_37":          float(dG_37),
+        **errors,
         "r_squared":      r_value ** 2,
         "slope":          slope,
         "intercept":      intercept,
@@ -645,6 +663,7 @@ def fit_full_function(
     solver=None,
     return_converged=False,
     bounds=None,
+    return_errors=False,
 ):
     """Nonlinear two-state fit of one curve.
 
@@ -653,7 +672,9 @@ def fit_full_function(
     ``bounds['mode']``.
 
     Returns ``(dG_37, dH, dS, Tm, y_Tm, base_b, base_ub, base_med)``; with
-    ``return_converged=True`` a trailing ``converged`` bool is appended.
+    ``return_converged=True`` a trailing ``converged`` bool is appended,
+    then with ``return_errors=True`` a dict of standard errors (SE_dH,
+    SE_dS, SE_dG at 37 °C, SE_Tm, cov_dH_dS, SE_note) from s²·(JᵀJ)⁻¹.
     ``Tm`` is the model melting temperature from the fitted ΔH/ΔS and c0
     (θ = 1/2), and ``y_Tm`` the fitted signal there (the mean baseline).
     Hitting ``max_nfev`` emits a ConvergenceWarning and returns the best
@@ -699,7 +720,53 @@ def fit_full_function(
     y_Tm = functions.linear(T_m, m_med, b_med)
 
     out = (dG_37, dH, dS, T_m, y_Tm, (m_b, b_b), (m_ub, b_ub), (m_med, b_med))
-    return (*out, converged) if return_converged else out
+    if return_converged:
+        out = (*out, converged)
+    if return_errors:
+        cov_HS, note = _dH_dS_covariance(res_lsq, _solver_settings(solver)["loss"])
+        errors = _thermo_error_fields(cov_HS, note)
+        errors["SE_Tm"] = (None if cov_HS is None
+                           else functions.tm_error(dH, dS, cov_HS, c0, struct_type))
+        out = (*out, errors)
+    return out
+
+def _thermo_error_fields(cov_HS, note) -> dict:
+    """SE_dH / SE_dS / SE_dG (37 °C) and cov_dH_dS from a 2×2 (ΔH, ΔS)
+    covariance; all None, with `note` saying why, when it is undefined."""
+    if cov_HS is None:
+        return {"SE_dH": None, "SE_dS": None, "SE_dG": None,
+                "cov_dH_dS": None, "SE_note": note}
+    se_H, se_S, se_G = functions.thermo_errors(cov_HS, 37.0)
+    return {"SE_dH": se_H, "SE_dS": se_S, "SE_dG": se_G,
+            "cov_dH_dS": float(cov_HS[0, 1]), "SE_note": note}
+
+
+def _dH_dS_covariance(res_lsq, loss="linear"):
+    """(2×2 covariance of ΔH, ΔS, note) from the Jacobian at a least_squares
+    solution whose first two parameters are ΔH and ΔS: s²·(JᵀJ)⁻¹ over the
+    parameters not held at a bound. Returns (None, reason) when undefined."""
+    J, r = np.asarray(res_lsq.jac, dtype=float), np.asarray(res_lsq.fun, dtype=float)
+    free = np.asarray(res_lsq.active_mask) == 0
+    if not (free[0] and free[1]):
+        return None, "ΔH or ΔS is at a fit bound: its error is undefined"
+    dof = J.shape[0] - int(free.sum())
+    if dof <= 0:
+        return None, "no degrees of freedom for an error"
+    Jf = J[:, free]
+    # Column scaling keeps the inversion well-posed: dS, slopes and
+    # intercepts differ by orders of magnitude.
+    scale = np.linalg.norm(Jf, axis=0)
+    if np.any(scale == 0):
+        return None, "a fit parameter does not affect the curve: error undefined"
+    Jn = Jf / scale
+    A = Jn.T @ Jn
+    if np.linalg.cond(A) > 1e12:
+        return None, "fit parameters are too strongly correlated: error undefined"
+    s2 = float(r @ r) / dof
+    cov = s2 * np.linalg.inv(A) / np.outer(scale, scale)
+    note = None if loss == "linear" else f"approximate (loss={loss!r})"
+    return cov[:2, :2], note
+
 
 def fit_full_function_multi(
     T,
@@ -716,13 +783,16 @@ def fit_full_function_multi(
     solver=None,
     return_converged=False,
     bounds=None,
+    return_errors=False,
 ):
     """Joint two-state fit of several curves sharing ΔH / ΔS.
 
     Returns ``(dG_37, dH, dS, Tms, y_Tms, base_lo, base_hi, base_med)``
     (lists per curve); ``return_converged=True`` appends a ``converged``
-    bool. Tms are model melting temperatures from ΔH/ΔS and each curve's
-    concentration; see fit_full_function for the max_nfev behaviour.
+    bool, then ``return_errors=True`` a dict with SE_dH, SE_dS, SE_dG
+    (37 °C), cov_dH_dS and SE_note, from the covariance s²·(JᵀJ)⁻¹ at the
+    solution. Tms are model melting temperatures from ΔH/ΔS and each
+    curve's concentration; see fit_full_function for the max_nfev behaviour.
     """
 
     xdata = T
@@ -793,5 +863,10 @@ def fit_full_function_multi(
         y_dats.append(functions.linear(T_m, m_m, b_m))
 
     out = (dG_37, dH, dS, T_ms, y_dats, baselines_lo, baselines_hi, baselines_me)
-    return (*out, converged) if return_converged else out
+    if return_converged:
+        out = (*out, converged)
+    if return_errors:
+        loss = _solver_settings(solver)["loss"]
+        out = (*out, _thermo_error_fields(*_dH_dS_covariance(res_lsq, loss)))
+    return out
 

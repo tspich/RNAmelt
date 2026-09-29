@@ -1197,10 +1197,11 @@ function renderResults(r) {
     rows.push(failNote(`Van't Hoff analysis failed: ${vh.error || 'unknown error'}`));
   }
   if (fit?.success) {
-    rows.push(card('Tₘ (fit)', fit.T_m_fit.toFixed(2), null, '°C')
-      + card('ΔH° (fit)', fit.dH.toFixed(2), null, 'kcal/mol')
-      + card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), null, 'cal/(mol·K)')
-      + card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), null, 'kcal/mol'));
+    rows.push(card('Tₘ (fit)', fit.T_m_fit.toFixed(2), seText(fit.SE_Tm, '°C'), '°C')
+      + card('ΔH° (fit)', fit.dH.toFixed(2), seText(fit.SE_dH, 'kcal/mol'), 'kcal/mol')
+      + card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), seText(fit.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)')
+      + card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), seText(fit.SE_dG, 'kcal/mol'), 'kcal/mol')
+      + seNoteHtml(fit.SE_note));
   } else if (fit && fit.success === false) {
     rows.push(failNote(`Curve fit failed: ${fit.error || 'unknown error'}`));
   }
@@ -1260,10 +1261,11 @@ function renderMultiResults(r) {
 
   const fmt = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
   let html = '';
-  html += card('ΔH° (multi fit)', fmt(r.dH), null, 'kcal/mol');
-  html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), null, 'cal/(mol·K)');
-  html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), null, 'kcal/mol');
+  html += card('ΔH° (multi fit)', fmt(r.dH), seText(r.SE_dH, 'kcal/mol'), 'kcal/mol');
+  html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), seText(r.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), seText(r.SE_dG, 'kcal/mol'), 'kcal/mol');
   html += card('n columns', r.columns.length, null, '');
+  html += seNoteHtml(r.SE_note);
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
@@ -1273,7 +1275,8 @@ function renderMultiResults(r) {
       TmRaw: prev.TmRaw ?? null,
       vh:    prev.vh    ?? null,
       fit:   prev.fit   ?? null,
-      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
+      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG,
+              SE_dH: r.SE_dH, SE_dS: r.SE_dS, SE_dG: r.SE_dG},
     };
   });
   renderColResults();
@@ -1366,14 +1369,15 @@ function renderConcentrationResults(r) {
     const meta = methodMeta[key];
     html += `<div class="col-span-full text-xs font-semibold uppercase tracking-wider text-muted mt-1">
       <span style="color:${meta.color}">●</span> ${meta.label} series</div>`;
+    if (s?.success) html += seNoteHtml(s.SE_note);
     if (!s?.success) {
       html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">${meta.label} series failed: ${s?.error || 'too few valid points'}</div>`;
       return;
     }
     html += `<div class="col-span-full grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">`
-      + card(`ΔH° (${meta.label})`,   fmtCard(s.dH), null, 'kcal/mol')
-      + card(`ΔS° (${meta.label})`,   fmtCard(s.dS * 1000, 1), null, 'cal/(mol·K)')
-      + card(`ΔG°₃₇ (${meta.label})`, fmtCard(s.dG_37), null, 'kcal/mol')
+      + card(`ΔH° (${meta.label})`,   fmtCard(s.dH), seText(s.SE_dH, 'kcal/mol'), 'kcal/mol')
+      + card(`ΔS° (${meta.label})`,   fmtCard(s.dS * 1000, 1), seText(s.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)')
+      + card(`ΔG°₃₇ (${meta.label})`, fmtCard(s.dG_37), seText(s.SE_dG, 'kcal/mol'), 'kcal/mol')
       + card(`R² (${meta.label})`,    fmtCard(s.r_squared, 4), null, '')
       + card('n points',              s.n, null, '')
       + `</div>`;
@@ -1418,9 +1422,9 @@ function renderConcentrationResults(r) {
       <td>${s.n}</td>
       <td>${(+s.slope).toExponential(3)}</td>
       <td>${(+s.intercept).toExponential(3)}</td>
-      <td>${(+s.dH).toFixed(2)}</td>
-      <td>${(+s.dS * 1000).toFixed(1)}</td>
-      <td>${(+s.dG_37).toFixed(2)}</td>
+      <td>${(+s.dH).toFixed(2)}${s.SE_dH != null ? ' ± ' + (+s.SE_dH).toFixed(2) : ''}</td>
+      <td>${(+s.dS * 1000).toFixed(1)}${s.SE_dS != null ? ' ± ' + (s.SE_dS * 1000).toFixed(1) : ''}</td>
+      <td>${(+s.dG_37).toFixed(2)}${s.SE_dG != null ? ' ± ' + (+s.SE_dG).toFixed(2) : ''}</td>
       <td>${(+s.r_squared).toFixed(4)}</td>
     </tr>`;
   }).join('');
@@ -1493,6 +1497,15 @@ window.removeColResult = function(col) {
   renderColResults();
 };
 
+// "± SE unit" for a card's second line; null when the error is undefined.
+function seText(se, unit, scale = 1, digits = 2) {
+  return (se == null || !isFinite(se)) ? null : `± ${(se * scale).toFixed(digits)} ${unit}`;
+}
+// Full-width muted line explaining a missing / approximate error.
+function seNoteHtml(note) {
+  return note ? `<div class="col-span-full text-xs font-mono text-muted" style="grid-column:1/-1">Standard error: ${note}</div>` : '';
+}
+
 function card(label,value,err,unit){
   return `<div class="bg-surface rounded-xl border border-border shadow-sm p-4">
     <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">${label}</div>
@@ -1556,6 +1569,8 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     'Tm_vH_C', 'dH_vH_kcal_mol', 'dS_vH_cal_molK', 'dG37_vH_kcal_mol',
     'Tm_fit_C', 'dH_fit_kcal_mol', 'dS_fit_cal_molK', 'dG37_fit_kcal_mol',
     'Tm_multi_C', 'dH_multi_kcal_mol', 'dS_multi_cal_molK', 'dG37_multi_kcal_mol',
+    'SE_dH_multi_kcal_mol', 'SE_dS_multi_cal_molK', 'SE_dG37_multi_kcal_mol',
+    'SE_Tm_fit_C', 'SE_dH_fit_kcal_mol', 'SE_dS_fit_cal_molK', 'SE_dG37_fit_kcal_mol',
   ];
   const cell = (v, scale=1) => (v == null || isNaN(v)) ? '' : (+v * scale).toString();
   const lines = [headers.join(',')];
@@ -1567,6 +1582,8 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       cell(e.vh?.T_m_vH),    cell(e.vh?.dH),    cell(e.vh?.dS, 1000),    cell(e.vh?.dG),
       cell(e.fit?.T_m_fit),  cell(e.fit?.dH),   cell(e.fit?.dS, 1000),   cell(e.fit?.dG),
       cell(e.multi?.T_m_fit),cell(e.multi?.dH), cell(e.multi?.dS, 1000), cell(e.multi?.dG),
+      cell(e.multi?.SE_dH),  cell(e.multi?.SE_dS, 1000), cell(e.multi?.SE_dG),
+      cell(e.fit?.SE_Tm),    cell(e.fit?.SE_dH),  cell(e.fit?.SE_dS, 1000),   cell(e.fit?.SE_dG),
     ].join(','));
   }
 
@@ -1595,11 +1612,12 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       ].join(','));
     });
     lines.push('');
-    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared'].join(','));
+    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared',
+                'SE_dH_kcal_mol','SE_dS_cal_molK','SE_dG37_kcal_mol'].join(','));
     [['raw','Tm_raw'], ['vh','Tm_vH'], ['fit','Tm_fit']].forEach(([key, lbl]) => {
       const s = csers[key];
       if (!s?.success) {
-        lines.push([lbl, '0', '', '', '', '', '', ''].join(','));
+        lines.push([lbl, '0', '', '', '', '', '', '', '', '', ''].join(','));
         return;
       }
       lines.push([
@@ -1611,6 +1629,9 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
         cell(s.dS, 1000),
         cell(s.dG_37),
         cell(s.r_squared),
+        cell(s.SE_dH),
+        cell(s.SE_dS, 1000),
+        cell(s.SE_dG),
       ].join(','));
     });
     if (cr.skipped && cr.skipped.length) {

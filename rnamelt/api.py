@@ -435,7 +435,8 @@ class SingleCurve:
 
         def _run_one(dH0, dS0, seed_info):
             try:
-                (dG_37, dH, dS, Tm, ym, base_b, base_ub, base_med, converged) = methods.fit_full_function(
+                (dG_37, dH, dS, Tm, ym, base_b, base_ub, base_med, converged,
+                 errors) = methods.fit_full_function(
                     TT, y,
                     c0          = self.c0,
                     dH_init     = dH0,
@@ -447,6 +448,7 @@ class SingleCurve:
                     bounds      = bnd,
                     solver      = sol,
                     return_converged = True,
+                    return_errors    = True,
                 )
             except Exception as e:
                 return SingleFit(ok=False, error=str(e), seed=seed_info)
@@ -472,6 +474,7 @@ class SingleCurve:
                 curve_fit  = curve_fit,
                 converged  = bool(converged),
                 seed       = seed_info,
+                **errors,
             )
 
         if strategy == "single":
@@ -659,7 +662,7 @@ class MultiCurves(Sequence[SingleCurve]):
 
         try:
             (dG_37, dH, dS, Tms, _y, bl_lo, bl_hi, bl_med,
-             converged) = methods.fit_full_function_multi(
+             converged, errors) = methods.fit_full_function_multi(
                 Ts, ys,
                 cs         = cs,
                 dH_init    = dH0,
@@ -671,6 +674,7 @@ class MultiCurves(Sequence[SingleCurve]):
                 bounds     = bnds,
                 solver     = sol,
                 return_converged = True,
+                return_errors    = True,
             )
         except Exception as e:
             return GlobalFit(error=f"global fit failed: {e}", seed=seed_info)
@@ -712,6 +716,7 @@ class MultiCurves(Sequence[SingleCurve]):
             curves = curves,
             converged = bool(converged),
             seed   = seed_info,
+            **errors,
         )
 
     def conc_dependency(
@@ -886,6 +891,11 @@ class MultiCurves(Sequence[SingleCurve]):
             inv_tm      = vh["inv_tm"],
             ln_ct_line  = ln_ct_line,
             inv_tm_line = vh["slope"] * ln_ct_line + vh["intercept"],
+            SE_dH       = vh["SE_dH"],
+            SE_dS       = vh["SE_dS"],
+            SE_dG       = vh["SE_dG"],
+            cov_dH_dS   = vh["cov_dH_dS"],
+            SE_note     = vh["SE_note"],
         )
 
 

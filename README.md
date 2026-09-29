@@ -137,6 +137,27 @@ van't Hoff, full fit) and runs one regression for each. The factor `f` is
 apply to monomers, whose Tm does not depend on concentration. Curves whose
 Tm cannot be extracted are listed in `cdr.skipped`.
 
+`SingleFit`, `GlobalFit` and each `ConcentrationSeries` carry standard
+errors `SE_dH`, `SE_dS`, `SE_dG` (same units as the values) and
+`cov_dH_dS`; `SingleFit` also has `SE_Tm`:
+
+- single and global fits: from the covariance s²·(JᵀJ)⁻¹ at the solution;
+  the Tm error is propagated from ΔH and ΔS through
+  Tm = ΔH / (ΔS + R·ln(C_T/f));
+- concentration series: from the scatter of the points about the line,
+  propagated from slope and intercept (needs at least 3 curves).
+
+The single-curve van't Hoff estimate and the raw Tm have no errors: their
+points are derived from one curve through the chosen baselines, so a
+formal error would be misleading.
+
+The ΔG error keeps the ΔH–ΔS covariance,
+var(ΔG) = var(ΔH) + T²·var(ΔS) − 2T·cov(ΔH, ΔS), which matters: ΔH and ΔS
+are strongly correlated. When an error is undefined (2 curves, or ΔH / ΔS
+at a fit bound), the SE fields are None and `SE_note` says why. These are
+the formal errors from measurement noise; they do not include the effect
+of the baseline choice.
+
 ### Settings
 
 Every tunable default lives in one dict, exported from `rnamelt`:
