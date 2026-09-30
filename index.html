@@ -1121,7 +1121,7 @@ function renderResults(r) {
     type:'scatter', data:{datasets:meltSets},
     options:scatterOpts(
       'Temperature (°C)',
-      'Fluorescence',
+      'Signal',
       {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
     ),
     plugins:[baselineWindowsPlugin(), analysisRangePlugin()],
@@ -1250,7 +1250,7 @@ function renderMultiResults(r) {
   meltRange.high = r.T_used[r.T_used.length - 1];
   rebuildChart('chartMelt', {
     type: 'scatter', data: {datasets: meltSets},
-    options: scatterOpts('Temperature (°C)', 'Fluorescence',
+    options: scatterOpts('Temperature (°C)', 'Signal',
       {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
     ),
     plugins: [analysisRangePlugin()],
