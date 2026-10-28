@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rnamelt"
-version = "0.2.0"
+version = "0.2.1"
 description = "Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of RNA melting curves"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,15 +48,19 @@ packages = ["rnamelt"]
 exclude = [
     "rnamelt/old_api.py",
     "rnamelt/auto_baseline_tests.py",
+    ".ipynb_checkpoints",
 ]
 
 [tool.hatch.build.targets.sdist]
+# Leading "/" anchors to the project root; unanchored patterns match at any
+# depth (e.g. .claude/worktrees/*/rnamelt, node_modules/*/README.md).
 include = [
-    "rnamelt",
-    "README.md",
-    "pyproject.toml",
+    "/rnamelt",
+    "/README.md",
+    "/pyproject.toml",
 ]
 exclude = [
-    "rnamelt/old_api.py",
-    "rnamelt/auto_baseline_tests.py",
+    "/rnamelt/old_api.py",
+    "/rnamelt/auto_baseline_tests.py",
+    ".ipynb_checkpoints",
 ]
