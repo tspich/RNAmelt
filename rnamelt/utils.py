@@ -6,8 +6,6 @@ import math
 
 import numpy as np
 
-#R = 8.314  # J/(mol·K)
-
 
 def celsius_to_kelvin(T_celsius):
     return np.array(T_celsius, dtype=float) + 273.15

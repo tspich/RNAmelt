@@ -1,4 +1,7 @@
 import warnings
+from collections.abc import Mapping
+from dataclasses import dataclass, field, fields, replace
+from typing import Optional
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -30,122 +33,20 @@ def _check_fit_status(res_lsq):
     raise ValueError(f"least_squares failed: {res_lsq.message}")
 
 # ── Settings ─────────────────────────────────────────────────────────────────
-# Every tunable default lives in one of the dicts below. SingleCurve takes
-# one override dict per group (solver=, vh=, fit_init=, bounds=,
-# multistart=, raw=). Unknown keys and invalid values are rejected when the
-# curve is built; a value of None in an override means "keep the default".
+# Every tunable default is a field of one of the frozen dataclasses below.
+# SingleCurve takes one per group (solver=, vh=, fit_init=, bounds=,
+# multistart=, raw=, windows=), as an instance or as a dict of overrides;
+# unknown keys and invalid values are rejected when the curve is built, and
+# None in an override keeps the current value.
 
-# scipy.optimize.least_squares options for the nonlinear fits. All keys but
-# `x_scale` are forwarded as-is. `x_scale` is the characteristic scale of
-# each parameter kind, expanded to the full parameter vector per fit.
-SOLVER_DEFAULTS = {
-    "max_nfev": 1e12,
-    "ftol":     1e-8,
-    "gtol":     1e-8,
-    "xtol":     1e-8,
-    "method":   "trf",
-    "loss":     "linear",
-    "f_scale":  0.02,
-    "jac":      "2-point",
-    "verbose":  0,
-    "x_scale":  {"dH": 1.0, "dS": 0.01, "slope": 1.0, "intercept": 100.0},
-}
+SEED_POLICIES = ("auto", "vh", "user", "fallback")
+BOUNDS_MODES = ("physical", "loose", "positive", "unbounded")
 
-# Subset of SOLVER_DEFAULTS forwarded as-is to least_squares().
+# Options of SolverSettings forwarded as-is to least_squares().
 _SCIPY_LEAST_SQUARES_KEYS = (
     "max_nfev", "ftol", "gtol", "xtol",
     "method", "loss", "f_scale", "jac", "verbose",
 )
-
-# van't Hoff linearisation (ln K vs T_scale/T). Points with folded fraction
-# outside [border, 1-border] are excluded; t1_min / t1_max clip the
-# linearised x-axis (None = no clip).
-VH_DEFAULTS = {
-    "border":  0.15,
-    "t1_min":  None,
-    "t1_max":  None,
-    "T_scale": 1000.0,
-}
-
-# Starting values for the nonlinear fit. `seed_from` picks where the dH /
-# dS starting values come from:
-#   "auto"     : dH_init / dS_init if set, else the van't Hoff estimate if it
-#                lies inside dH_seed_range / dS_seed_range, else the fallback
-#   "vh"       : van't Hoff estimate (if in range), else the fallback;
-#                dH_init / dS_init are ignored
-#   "user"     : dH_init / dS_init, both required
-#   "fallback" : dH_fallback / dS_fallback (no van't Hoff is computed)
-# lin_init = number of leading / trailing points averaged for the
-# baseline-intercept seeds; b1_init / b2_init = explicit (slope, intercept)
-# seeds for the folded / unfolded baselines.
-SEED_POLICIES = ("auto", "vh", "user", "fallback")
-FIT_INIT_DEFAULTS = {
-    "seed_from":     "auto",
-    "dH_init":       None,
-    "dS_init":       None,
-    "lin_init":      10,
-    "b1_init":       None,
-    "b2_init":       None,
-    "dH_fallback":   -80.0,
-    "dS_fallback":   -0.2,
-    "dH_seed_range": (-150.0, 0.0),
-    "dS_seed_range": (-5.0, 0.0),
-}
-
-# Parameter bounds for the nonlinear fit. dH (kcal/mol) and dS
-# (kcal/(mol·K)) are boxed by `dH` / `dS`; `mode` bounds the baseline
-# slopes (see _fit_bounds) and `slope_cap_k` sets the cap of "physical".
-# A fit whose model Tm lies more than `Tm_margin` °C outside the fitted
-# window did not find the transition and is reported as failed.
-BOUNDS_MODES = ("physical", "loose", "positive", "unbounded")
-BOUNDS_DEFAULTS = {
-    "mode":        "physical",
-    "dH":          (-200.0, 0.0),
-    "dS":          (-5.0, 0.0),
-    "slope_cap_k": 5.0,
-    "Tm_margin":   3.0,
-}
-
-# strategy="multistart": one fit per dH seed (plus fwhm_factors × the
-# FWHM-of-dS/dT estimate), dS seed = dH seed / seed_Tm_K. A result counts
-# counts only if it passes the Tm check (bounds["Tm_margin"]) and
-# |dH| >= min_abs_dH; the lowest-RMS such result wins.
-MULTISTART_DEFAULTS = {
-    "dH_seeds":     (-40.0, -80.0, -120.0, -160.0),
-    "fwhm_factors": (1.0, 1.5),
-    "seed_Tm_K":    350.0,
-    "min_abs_dH":   10.0,
-}
-
-# Raw Tm (crossing of the mean baseline with the data): the first / last
-# `edge_skip` points are ignored when searching for the crossing.
-RAW_DEFAULTS = {
-    "edge_skip": 10,
-}
-
-
-# Baseline windows used when a SingleCurve is built without explicit
-# windows: detected with auto_baseline.find_baselines (`detector` = its
-# keyword arguments); if detection fails, `fallback_width` °C at each scan
-# edge, with a BaselineWarning.
-WINDOW_DEFAULTS = {
-    "detector":       {},
-    "fallback_width": 10.0,
-}
-
-
-def _merge(group, defaults, overrides):
-    """Overlay overrides on defaults; reject unknown keys, skip None values."""
-    out = dict(defaults)
-    if overrides:
-        for k, v in dict(overrides).items():
-            if k not in defaults:
-                raise ValueError(
-                    f"unknown {group} option {k!r}; valid keys: {sorted(defaults)}"
-                )
-            if v is not None:
-                out[k] = v
-    return out
 
 
 def _finite(group, key, v):
@@ -175,150 +76,260 @@ def _positive_int(group, key, v, minimum=1):
     return int(v)
 
 
-def _solver_settings(overrides=None):
-    """Validated solver settings (defaults + overrides)."""
-    s = _merge("solver", SOLVER_DEFAULTS, overrides)
-    xs = _merge("solver['x_scale']", SOLVER_DEFAULTS["x_scale"],
-                (overrides or {}).get("x_scale"))
-    for k, v in xs.items():
-        if _finite("solver['x_scale']", k, v) <= 0:
-            raise ValueError(f"solver['x_scale'][{k!r}] must be > 0, got {v!r}")
-    s["x_scale"] = xs
-    if _finite("solver", "max_nfev", s["max_nfev"]) < 1:
-        raise ValueError(f"solver['max_nfev'] must be >= 1, got {s['max_nfev']!r}")
-    return s
+class _Settings:
+    """Shared behaviour of the settings dataclasses."""
+    _group = ""
+
+    @classmethod
+    def of(cls, value=None, **changes):
+        """Settings from None (defaults), an instance, or a dict of
+        overrides, with ``changes`` applied on top."""
+        base = value if isinstance(value, cls) else cls()
+        if isinstance(value, Mapping):
+            changes = {**value, **changes}
+        elif value is not None and not isinstance(value, cls):
+            raise ValueError(f"{cls._group} settings must be a dict or {cls.__name__}, "
+                             f"got {value!r}")
+        return base.updated(changes)
+
+    def updated(self, changes=None):
+        """A copy with ``changes`` applied: None values keep the current value,
+        dict fields (x_scale, detector) are merged key by key."""
+        if isinstance(changes, type(self)):
+            return changes
+        changes = dict(changes or {})
+        names = [f.name for f in fields(self)]
+        unknown = sorted(set(changes) - set(names))
+        if unknown:
+            raise ValueError(f"unknown {self._group} option(s) {unknown}; "
+                             f"valid keys: {names}")
+        kept = {}
+        for k, v in changes.items():
+            if v is None:
+                continue
+            cur = getattr(self, k)
+            kept[k] = {**cur, **dict(v)} if isinstance(cur, Mapping) and isinstance(v, Mapping) else v
+        return replace(self, **kept) if kept else self
+
+    def _set(self, name, value):
+        object.__setattr__(self, name, value)
 
 
-def _vh_settings(overrides=None):
-    """Validated van't Hoff settings; the dict doubles as vant_hoff() kwargs."""
-    s = _merge("vh", VH_DEFAULTS, overrides)
-    b = _finite("vh", "border", s["border"])
-    if not 0.0 <= b < 0.5:
-        raise ValueError(f"vh['border'] must be in [0, 0.5), got {b}")
-    if _finite("vh", "T_scale", s["T_scale"]) <= 0:
-        raise ValueError(f"vh['T_scale'] must be > 0, got {s['T_scale']!r}")
-    for k in ("t1_min", "t1_max"):
-        if s[k] == -1:             # legacy "no clip" sentinel
-            s[k] = None
-        if s[k] is not None:
-            s[k] = _finite("vh", k, s[k])
-    if s["t1_min"] is not None and s["t1_max"] is not None and not s["t1_min"] < s["t1_max"]:
-        raise ValueError(f"vh needs t1_min < t1_max, got {s['t1_min']}, {s['t1_max']}")
-    return s
+@dataclass(frozen=True)
+class SolverSettings(_Settings):
+    """scipy.optimize.least_squares options for the nonlinear fits;
+    ``x_scale`` is the characteristic scale of each parameter kind."""
+    _group = "solver"
+    max_nfev: float = 1e12
+    ftol: float = 1e-8
+    gtol: float = 1e-8
+    xtol: float = 1e-8
+    method: str = "trf"
+    loss: str = "linear"
+    f_scale: float = 0.02
+    jac: str = "2-point"
+    verbose: int = 0
+    x_scale: Mapping = field(default_factory=lambda: {
+        "dH": 1.0, "dS": 0.01, "slope": 1.0, "intercept": 100.0})
+
+    def __post_init__(self):
+        xs = dict(self.x_scale)
+        unknown = sorted(set(xs) - {"dH", "dS", "slope", "intercept"})
+        if unknown:
+            raise ValueError(f"unknown solver['x_scale'] option(s) {unknown}; "
+                             f"valid keys: ['dH', 'dS', 'slope', 'intercept']")
+        for k, v in xs.items():
+            if _finite("solver['x_scale']", k, v) <= 0:
+                raise ValueError(f"solver['x_scale'][{k!r}] must be > 0, got {v!r}")
+        self._set("x_scale", xs)
+        if _finite("solver", "max_nfev", self.max_nfev) < 1:
+            raise ValueError(f"solver['max_nfev'] must be >= 1, got {self.max_nfev!r}")
 
 
-def _fit_init_settings(overrides=None):
-    """Validated fit starting-value settings."""
-    s = _merge("fit_init", FIT_INIT_DEFAULTS, overrides)
-    if s["seed_from"] not in SEED_POLICIES:
-        raise ValueError(f"unknown fit_init['seed_from'] {s['seed_from']!r}; "
-                         f"valid: {list(SEED_POLICIES)}")
-    if s["seed_from"] == "user" and (s["dH_init"] is None or s["dS_init"] is None):
-        raise ValueError("fit_init['seed_from']='user' needs both dH_init and dS_init")
-    for k in ("dH_init", "dS_init"):
-        if s[k] is not None:
-            s[k] = _finite("fit_init", k, s[k])
-    for k in ("dH_fallback", "dS_fallback"):
-        s[k] = _finite("fit_init", k, s[k])
-    for k in ("dH_seed_range", "dS_seed_range"):
-        s[k] = _interval("fit_init", k, s[k])
-    s["lin_init"] = _positive_int("fit_init", "lin_init", s["lin_init"])
-    for k in ("b1_init", "b2_init"):
-        if s[k] is not None:
+@dataclass(frozen=True)
+class VanHoffSettings(_Settings):
+    """van't Hoff linearisation (ln K vs T_scale/T): points with folded
+    fraction outside [border, 1 − border] are excluded; t1_min / t1_max clip
+    the linearised x-axis (None = no clip)."""
+    _group = "vh"
+    border: float = 0.15
+    t1_min: Optional[float] = None
+    t1_max: Optional[float] = None
+    T_scale: float = 1000.0
+
+    def __post_init__(self):
+        if not 0.0 <= _finite("vh", "border", self.border) < 0.5:
+            raise ValueError(f"vh['border'] must be in [0, 0.5), got {self.border}")
+        if _finite("vh", "T_scale", self.T_scale) <= 0:
+            raise ValueError(f"vh['T_scale'] must be > 0, got {self.T_scale!r}")
+        for k in ("t1_min", "t1_max"):
+            if getattr(self, k) is not None:
+                self._set(k, _finite("vh", k, getattr(self, k)))
+        if self.t1_min is not None and self.t1_max is not None and not self.t1_min < self.t1_max:
+            raise ValueError(f"vh needs t1_min < t1_max, got {self.t1_min}, {self.t1_max}")
+
+
+@dataclass(frozen=True)
+class FitInitSettings(_Settings):
+    """Starting values of the nonlinear fit. ``seed_from`` picks the dH / dS
+    starting values:
+      "auto"     dH_init / dS_init if set, else the van't Hoff estimate if it
+                 lies inside dH_seed_range / dS_seed_range, else the fallback
+      "vh"       van't Hoff estimate (if in range), else the fallback
+      "user"     dH_init / dS_init, both required
+      "fallback" dH_fallback / dS_fallback (no van't Hoff is computed)
+    ``lin_init`` points are averaged for the baseline-intercept seeds;
+    ``b1_init`` / ``b2_init`` are explicit (slope, intercept) seeds."""
+    _group = "fit_init"
+    seed_from: str = "auto"
+    dH_init: Optional[float] = None
+    dS_init: Optional[float] = None
+    lin_init: int = 10
+    b1_init: Optional[tuple] = None
+    b2_init: Optional[tuple] = None
+    dH_fallback: float = -80.0
+    dS_fallback: float = -0.2
+    dH_seed_range: tuple = (-150.0, 0.0)
+    dS_seed_range: tuple = (-5.0, 0.0)
+
+    def __post_init__(self):
+        if self.seed_from not in SEED_POLICIES:
+            raise ValueError(f"unknown fit_init['seed_from'] {self.seed_from!r}; "
+                             f"valid: {list(SEED_POLICIES)}")
+        if self.seed_from == "user" and (self.dH_init is None or self.dS_init is None):
+            raise ValueError("fit_init['seed_from']='user' needs both dH_init and dS_init")
+        for k in ("dH_init", "dS_init"):
+            if getattr(self, k) is not None:
+                self._set(k, _finite("fit_init", k, getattr(self, k)))
+        for k in ("dH_fallback", "dS_fallback"):
+            self._set(k, _finite("fit_init", k, getattr(self, k)))
+        for k in ("dH_seed_range", "dS_seed_range"):
+            self._set(k, _interval("fit_init", k, getattr(self, k)))
+        self._set("lin_init", _positive_int("fit_init", "lin_init", self.lin_init))
+        for k in ("b1_init", "b2_init"):
+            v = getattr(self, k)
+            if v is not None:
+                try:
+                    m, b = v
+                except (TypeError, ValueError):
+                    raise ValueError(f"fit_init[{k!r}] must be a (slope, intercept) pair, got {v!r}")
+                self._set(k, (_finite("fit_init", k, m), _finite("fit_init", k, b)))
+
+    @property
+    def needs_vh(self) -> bool:
+        """Does picking the dH / dS seeds need a van't Hoff estimate?"""
+        return self.seed_from == "vh" or (
+            self.seed_from == "auto" and (self.dH_init is None or self.dS_init is None))
+
+    def seeds(self, vh_estimates=()) -> dict:
+        """dH (kcal/mol) / dS (kcal/(mol·K)) starting values under seed_from,
+        as {"dH", "dS", "dH_from", "dS_from"} with sources "user", "vh" or
+        "fallback". ``vh_estimates`` are van't Hoff (dH, dS) pairs; those with
+        both values inside the seed ranges are used, through their median."""
+        (hlo, hhi), (slo, shi) = self.dH_seed_range, self.dS_seed_range
+        vh_ok = [(h, s) for h, s in vh_estimates if hlo < h < hhi and slo < s < shi]
+        seeds = {}
+        for i, (key, user, fallback) in enumerate((("dH", self.dH_init, self.dH_fallback),
+                                                   ("dS", self.dS_init, self.dS_fallback))):
+            if self.seed_from in ("auto", "user") and user is not None:
+                seeds[key], seeds[key + "_from"] = user, "user"
+            elif self.seed_from in ("auto", "vh") and vh_ok:
+                seeds[key] = float(np.median([p[i] for p in vh_ok]))
+                seeds[key + "_from"] = "vh"
+            else:
+                seeds[key], seeds[key + "_from"] = fallback, "fallback"
+        return seeds
+
+
+@dataclass(frozen=True)
+class BoundsSettings(_Settings):
+    """Bounds of the nonlinear fit: dH (kcal/mol) and dS (kcal/(mol·K))
+    boxes; ``mode`` bounds the baseline slopes (see _fit_bounds) and
+    ``slope_cap_k`` sets the cap of "physical". A fit whose model Tm lies
+    more than ``Tm_margin`` °C outside the fitted window is reported as failed."""
+    _group = "bounds"
+    mode: str = "physical"
+    dH: tuple = (-200.0, 0.0)
+    dS: tuple = (-5.0, 0.0)
+    slope_cap_k: float = 5.0
+    Tm_margin: float = 3.0
+
+    def __post_init__(self):
+        if self.mode not in BOUNDS_MODES:
+            raise ValueError(f"unknown bounds mode {self.mode!r}; valid: {list(BOUNDS_MODES)}")
+        self._set("dH", _interval("bounds", "dH", self.dH))
+        self._set("dS", _interval("bounds", "dS", self.dS))
+        if _finite("bounds", "slope_cap_k", self.slope_cap_k) <= 0:
+            raise ValueError(f"bounds['slope_cap_k'] must be > 0, got {self.slope_cap_k!r}")
+        if _finite("bounds", "Tm_margin", self.Tm_margin) < 0:
+            raise ValueError(f"bounds['Tm_margin'] must be >= 0, got {self.Tm_margin!r}")
+
+
+@dataclass(frozen=True)
+class MultistartSettings(_Settings):
+    """strategy="multistart": one fit per dH seed (plus fwhm_factors × the
+    FWHM-of-dS/dT estimate), dS seed = dH seed / seed_Tm_K. A result counts
+    only if it passes the Tm check and |dH| >= min_abs_dH; the lowest-RMS
+    such result wins."""
+    _group = "multistart"
+    dH_seeds: tuple = (-40.0, -80.0, -120.0, -160.0)
+    fwhm_factors: tuple = (1.0, 1.5)
+    seed_Tm_K: float = 350.0
+    min_abs_dH: float = 10.0
+
+    def __post_init__(self):
+        for k in ("dH_seeds", "fwhm_factors"):
             try:
-                m, b = s[k]
-            except (TypeError, ValueError):
-                raise ValueError(f"fit_init[{k!r}] must be a (slope, intercept) pair, got {s[k]!r}")
-            s[k] = (_finite("fit_init", k, m), _finite("fit_init", k, b))
-    return s
+                self._set(k, tuple(_finite("multistart", k, v) for v in getattr(self, k)))
+            except TypeError:
+                raise ValueError(f"multistart[{k!r}] must be a sequence of numbers, "
+                                 f"got {getattr(self, k)!r}")
+        if not self.dH_seeds and not self.fwhm_factors:
+            raise ValueError("multistart needs at least one dH seed or fwhm factor")
+        if _finite("multistart", "seed_Tm_K", self.seed_Tm_K) <= 0:
+            raise ValueError(f"multistart['seed_Tm_K'] must be > 0, got {self.seed_Tm_K!r}")
+        if _finite("multistart", "min_abs_dH", self.min_abs_dH) < 0:
+            raise ValueError(f"multistart['min_abs_dH'] must be >= 0, got {self.min_abs_dH!r}")
 
 
-def _bounds_settings(overrides=None):
-    """Validated fit-bounds settings."""
-    s = _merge("bounds", BOUNDS_DEFAULTS, overrides)
-    if s["mode"] not in BOUNDS_MODES:
-        raise ValueError(f"unknown bounds mode {s['mode']!r}; valid: {list(BOUNDS_MODES)}")
-    s["dH"] = _interval("bounds", "dH", s["dH"])
-    s["dS"] = _interval("bounds", "dS", s["dS"])
-    if _finite("bounds", "slope_cap_k", s["slope_cap_k"]) <= 0:
-        raise ValueError(f"bounds['slope_cap_k'] must be > 0, got {s['slope_cap_k']!r}")
-    if _finite("bounds", "Tm_margin", s["Tm_margin"]) < 0:
-        raise ValueError(f"bounds['Tm_margin'] must be >= 0, got {s['Tm_margin']!r}")
-    return s
+@dataclass(frozen=True)
+class RawSettings(_Settings):
+    """Raw Tm (crossing of the mean baseline with the data): the first / last
+    ``edge_skip`` points are ignored when searching for the crossing."""
+    _group = "raw"
+    edge_skip: int = 10
+
+    def __post_init__(self):
+        self._set("edge_skip", _positive_int("raw", "edge_skip", self.edge_skip, minimum=0))
 
 
-def _multistart_settings(overrides=None):
-    """Validated multistart settings."""
-    s = _merge("multistart", MULTISTART_DEFAULTS, overrides)
-    for k in ("dH_seeds", "fwhm_factors"):
-        try:
-            vals = tuple(_finite("multistart", k, v) for v in s[k])
-        except TypeError:
-            raise ValueError(f"multistart[{k!r}] must be a sequence of numbers, got {s[k]!r}")
-        s[k] = vals
-    if not s["dH_seeds"] and not s["fwhm_factors"]:
-        raise ValueError("multistart needs at least one dH seed or fwhm factor")
-    if _finite("multistart", "seed_Tm_K", s["seed_Tm_K"]) <= 0:
-        raise ValueError(f"multistart['seed_Tm_K'] must be > 0, got {s['seed_Tm_K']!r}")
-    if _finite("multistart", "min_abs_dH", s["min_abs_dH"]) < 0:
-        raise ValueError(f"multistart['min_abs_dH'] must be >= 0, got {s['min_abs_dH']!r}")
-    return s
+@dataclass(frozen=True)
+class WindowSettings(_Settings):
+    """Baseline windows of a SingleCurve built without explicit windows:
+    detected with auto_baseline.find_baselines (``detector`` = its keyword
+    arguments); if detection fails, ``fallback_width`` °C at each scan edge,
+    with a BaselineWarning. The detector keys are checked by the API."""
+    _group = "windows"
+    detector: Mapping = field(default_factory=dict)
+    fallback_width: float = 10.0
 
-
-def _raw_settings(overrides=None):
-    """Validated raw-Tm settings."""
-    s = _merge("raw", RAW_DEFAULTS, overrides)
-    s["edge_skip"] = _positive_int("raw", "edge_skip", s["edge_skip"], minimum=0)
-    return s
-
-
-def _window_settings(overrides=None):
-    """Validated window settings. The detector keys themselves are checked
-    against find_baselines by the API (this module doesn't import it)."""
-    s = _merge("windows", WINDOW_DEFAULTS, overrides)
-    if not isinstance(s["detector"], dict):
-        raise ValueError(f"windows['detector'] must be a dict, got {s['detector']!r}")
-    s["detector"] = dict(s["detector"])
-    if _finite("windows", "fallback_width", s["fallback_width"]) <= 0:
-        raise ValueError(f"windows['fallback_width'] must be > 0, got {s['fallback_width']!r}")
-    return s
-
-
-_SETTINGS_FN = {
-    "windows":    _window_settings,
-    "solver":     _solver_settings,
-    "vh":         _vh_settings,
-    "fit_init":   _fit_init_settings,
-    "bounds":     _bounds_settings,
-    "multistart": _multistart_settings,
-    "raw":        _raw_settings,
-}
-
-
-def _layer(group, base, override):
-    """Validated settings for ``group``: ``override`` applied on top of the
-    already-resolved ``base`` (e.g. a curve's settings). Nested dicts such as
-    solver['x_scale'] are merged key by key; None values keep the base."""
-    combined = dict(base)
-    for k, v in dict(override or {}).items():
-        if v is None:
-            continue
-        if isinstance(combined.get(k), dict) and isinstance(v, dict):
-            combined[k] = {**combined[k], **v}
-        else:
-            combined[k] = v
-    return _SETTINGS_FN[group](combined)
+    def __post_init__(self):
+        if not isinstance(self.detector, Mapping):
+            raise ValueError(f"windows['detector'] must be a dict, got {self.detector!r}")
+        self._set("detector", dict(self.detector))
+        if _finite("windows", "fallback_width", self.fallback_width) <= 0:
+            raise ValueError(f"windows['fallback_width'] must be > 0, got {self.fallback_width!r}")
 
 
 def _least_squares_kwargs(solver):
     """least_squares kwargs (without x_scale) from solver settings/overrides."""
-    s = _solver_settings(solver)
-    return {k: s[k] for k in _SCIPY_LEAST_SQUARES_KEYS}
+    s = SolverSettings.of(solver)
+    return {k: getattr(s, k) for k in _SCIPY_LEAST_SQUARES_KEYS}
 
 
 def _x_scale(solver, n_curves=1):
     """x_scale vector for [dH, dS] + n_curves × [m1, b1, m2, b2]."""
-    xs = _solver_settings(solver)["x_scale"]
+    xs = SolverSettings.of(solver).x_scale
     per_curve = [xs["slope"], xs["intercept"], xs["slope"], xs["intercept"]]
     return [xs["dH"], xs["dS"]] + per_curve * n_curves
 
@@ -335,13 +346,15 @@ def T_m_ds_raw(temperatures,
     The folded baseline is fitted on [baseline_bound_minT,
     baseline_bound_maxT], the unfolded one on [baseline_unbound_minT,
     baseline_unbound_maxT] (°C; the inner edges are required, missing outer
-    edges default to the scan edges). ``edge_skip`` (default RAW_DEFAULTS)
-    end points are ignored when searching for the crossing.
+    edges default to the scan edges). A zero-width window (equal edges)
+    gives a flat baseline at the signal measured nearest that temperature,
+    the best guess when the plateau is missing. ``edge_skip`` (default
+    RawSettings) end points are ignored when searching for the crossing.
     Returns ``(Tm, y_Tm, base_b, base_ub, base_med)``.
     """
     T = np.array(temperatures)
     if edge_skip is None:
-        edge_skip = RAW_DEFAULTS["edge_skip"]
+        edge_skip = RawSettings().edge_skip
     if baseline_bound_maxT is None or baseline_unbound_minT is None:
         raise ValueError("T_m_ds_raw needs baseline_bound_maxT and baseline_unbound_minT")
 
@@ -350,19 +363,27 @@ def T_m_ds_raw(temperatures,
     bl_b_maxT  = baseline_bound_maxT
     bl_ub_minT = baseline_unbound_minT
 
-    if bl_b_maxT <= bl_b_minT:
+    if bl_b_maxT < bl_b_minT:
         raise ValueError(
             f"folded baseline window is empty or inverted: "
             f"[{bl_b_minT}, {bl_b_maxT}] °C"
         )
-    if bl_ub_maxT <= bl_ub_minT:
+    elif bl_b_maxT == bl_b_minT:
+        m_bound = 0.0
+        b_bound = float(ydata[np.argmin(np.abs(T - bl_b_maxT))])
+    else:
+        m_bound, b_bound = functions.fit_linear(T, ydata, bl_b_minT, bl_b_maxT)
+
+    if bl_ub_maxT < bl_ub_minT:
         raise ValueError(
             f"unfolded baseline window is empty or inverted: "
             f"[{bl_ub_minT}, {bl_ub_maxT}] °C"
         )
-
-    m_bound, b_bound = functions.fit_linear(T, ydata, bl_b_minT, bl_b_maxT)
-    m_unbound, b_unbound = functions.fit_linear(T, ydata, bl_ub_minT, bl_ub_maxT)
+    elif bl_ub_maxT == bl_ub_minT:
+        m_unbound = 0.0
+        b_unbound = float(ydata[np.argmin(np.abs(T - bl_ub_minT))])
+    else:
+        m_unbound, b_unbound = functions.fit_linear(T, ydata, bl_ub_minT, bl_ub_maxT)
 
     # median of base lines
     m_med, b_med = (m_bound + m_unbound) / 2, (b_bound + b_unbound) / 2
@@ -383,25 +404,23 @@ def vant_hoff(T,
              t1_min = None,
              t1_max = None,
              struct_type = 'heterodimer'):
-    """Linearised van't Hoff analysis. Unset options take VH_DEFAULTS."""
-    vh = _vh_settings({"border": border, "T_scale": T_scale,
-                       "t1_min": t1_min, "t1_max": t1_max})
-    border, T_scale = vh["border"], vh["T_scale"]
-    t1_min, t1_max = vh["t1_min"], vh["t1_max"]
-    # ln K(θ) = ln(a · θ / (c0 (1-θ)²)) with a = 2 for A + B ⇌ AB and
-    # a = 1/2 for 2A ⇌ A₂ (θ = folded fraction); K at Tm (θ = 1/2) is
-    # 4/c0 and 1/c0 respectively — see functions.tm_from_therm.
-    if struct_type == 'heterodimer':
-        a, k_tm = 2.0, 4.0
-    elif struct_type == 'homodimer':
-        a, k_tm = 0.5, 1.0
-    elif struct_type == 'monomer':
+    """Linearised van't Hoff analysis. Unset options take VanHoffSettings.
+
+    ``c0`` is the total strand concentration (M) or, for a heterodimer with
+    unequal strands, the pair (c_A, c_B) per strand (M)."""
+    vh = VanHoffSettings.of(border=border, T_scale=T_scale, t1_min=t1_min, t1_max=t1_max)
+    border, T_scale, lo, hi = vh.border, vh.T_scale, vh.t1_min, vh.t1_max
+    # ln K(θ) from functions.ln_k_from_theta; at Tm (θ = 1/2) K = 1/c_eff
+    # (4/c0 for a heterodimer, 1/c0 for a homodimer) — see
+    # functions.tm_from_therm.
+    if struct_type == 'monomer':
         raise ValueError("Van't Hoff analysis not possible for monomers")
-    else:
+    if struct_type not in ('heterodimer', 'homodimer'):
         raise ValueError(
             f"unknown struct_type {struct_type!r}; "
             f"valid: 'heterodimer', 'homodimer', 'monomer'"
         )
+    ln_k_tm = -np.log(functions.c_eff(c0, struct_type))
 
     # fraction folded from the two linear baselines
     f_folded = [
@@ -414,7 +433,7 @@ def vant_hoff(T,
     ]
 
     K = [
-        np.log(a * ff / (c0 * ((1.0 - ff) ** 2)))
+        functions.ln_k_from_theta(ff, c0, struct_type)
         if border <= ff <= (1 - border)
         else None
         for ff in f_folded
@@ -423,9 +442,7 @@ def vant_hoff(T,
     t1 = [T_scale / (t - constants.T0) for t in T]
 
     # keep points with a defined ln K and t1 inside [t1_min, t1_max]
-    # (-1 or None = no clip on that side)
-    lo = None if t1_min in (-1, None) else t1_min
-    hi = None if t1_max in (-1, None) else t1_max
+    # (None = no clip on that side)
     tt, lnK = [], []
     for x, k in zip(t1, K):
         if k is None:
@@ -452,22 +469,30 @@ def vant_hoff(T,
                             [1, 1],
                             args=(xdata, ydata))
 
-    t_m = (np.log(k_tm / c0) - res_lsq.x[1]) / res_lsq.x[0]
+    t_m = (ln_k_tm - res_lsq.x[1]) / res_lsq.x[0]
     T_m = T_scale / t_m + constants.T0
     dH  = -res_lsq.x[0] * constants.R * T_scale
-    dS    = dH / (T_m - constants.T0) + constants.R * np.log(k_tm / c0)
+    dS    = dH / (T_m - constants.T0) + constants.R * ln_k_tm
     dG_37 = dH - (37. - constants.T0) * dS
 
-    return T_m, dG_37, dH, dS, t1, K, xdata, ydata, res_lsq.x
+    return T_m, dG_37, dH, dS, t1, K, xdata, ydata, tuple(res_lsq.x.tolist())
 
 def vant_hoff_concentration(
     tm_values,
-    concentrations,
+    concentrations=None,
     self_complementary: bool = False,
+    c_eff=None,
 ) -> dict:
-    """Linear-regression van't Hoff fit of 1/Tm vs ln(C_T/f) → ΔH, ΔS, ΔG(37°C)."""
+    """Linear-regression van't Hoff fit of 1/Tm vs ln(C_T/f) → ΔH, ΔS, ΔG(37°C).
+
+    Give either the total strand concentrations (M) with
+    ``self_complementary`` (f = 1 or 4), or ``c_eff`` (M), the effective
+    concentrations of functions.c_eff, regressed as ln c_eff (needed when
+    strand ratios differ between curves)."""
+    if (concentrations is None) == (c_eff is None):
+        raise ValueError("give either concentrations or c_eff")
     tm = np.asarray(tm_values, dtype=float)
-    ct = np.asarray(concentrations, dtype=float)
+    ct = np.asarray(concentrations if c_eff is None else c_eff, dtype=float)
 
     if tm.shape != ct.shape:
         raise ValueError(
@@ -483,7 +508,7 @@ def vant_hoff_concentration(
     if np.any(~np.isfinite(ct)) or np.any(ct <= 0):
         raise ValueError("Concentrations must be finite and > 0 (Molar)")
 
-    f = 1.0 if self_complementary else 4.0
+    f = 1.0 if (self_complementary or c_eff is not None) else 4.0
     ln_ct = np.log(ct / f)
     inv_tm = 1.0 / tm
 
@@ -559,7 +584,7 @@ def _slope_cap(T, d, k=5.0):
 def _fit_bounds(T, d, mode=None, bounds=None):
     """Return (lo, hi) parameter bounds for [dH, dS, m1, b1, m2, b2].
 
-    ``bounds`` is a BOUNDS_DEFAULTS-style override dict (dH / dS boxes,
+    ``bounds`` is a BoundsSettings or an override dict (dH / dS boxes,
     slope_cap_k); ``mode`` overrides ``bounds['mode']``. Baseline modes:
       "physical"  : |m1|, |m2| <= slope_cap_k × (ΔS/ΔT of the data)
       "loose"     : m1 >= 0, m2 free
@@ -567,15 +592,15 @@ def _fit_bounds(T, d, mode=None, bounds=None):
       "unbounded" : both slopes free
     Intercepts are always free.
     """
-    b = _bounds_settings({**(bounds or {}), **({"mode": mode} if mode else {})})
-    (dH_lo, dH_hi), (dS_lo, dS_hi) = b["dH"], b["dS"]
+    b = BoundsSettings.of(bounds, mode=mode)
+    (dH_lo, dH_hi), (dS_lo, dS_hi) = b.dH, b.dS
     inf = np.inf
-    if b["mode"] == "physical":
-        cap = _slope_cap(T, d, k=b["slope_cap_k"])
+    if b.mode == "physical":
+        cap = _slope_cap(T, d, k=b.slope_cap_k)
         m1, m2 = (-cap, cap), (-cap, cap)
-    elif b["mode"] == "loose":
+    elif b.mode == "loose":
         m1, m2 = (0.0, inf), (-inf, inf)
-    elif b["mode"] == "positive":
+    elif b.mode == "positive":
         m1, m2 = (0.0, inf), (0.0, inf)
     else:  # "unbounded"
         m1, m2 = (-inf, inf), (-inf, inf)
@@ -667,8 +692,8 @@ def fit_full_function(
 ):
     """Nonlinear two-state fit of one curve.
 
-    Unset starting values take FIT_INIT_DEFAULTS (dH/dS fallbacks, lin_init),
-    unset bounds take BOUNDS_DEFAULTS; ``bounds_mode`` overrides
+    Unset starting values take FitInitSettings (dH/dS fallbacks, lin_init),
+    unset bounds take BoundsSettings; ``bounds_mode`` overrides
     ``bounds['mode']``.
 
     Returns ``(dG_37, dH, dS, Tm, y_Tm, base_b, base_ub, base_med)``; with
@@ -682,15 +707,14 @@ def fit_full_function(
     """
     xdata = np.array(T)
     ydata = np.array(d)
-    init = _fit_init_settings({"dH_init": dH_init, "dS_init": dS_init,
-                               "lin_init": lin_init})
-    dH0 = init["dH_init"] if init["dH_init"] is not None else init["dH_fallback"]
-    dS0 = init["dS_init"] if init["dS_init"] is not None else init["dS_fallback"]
+    init = FitInitSettings.of(dH_init=dH_init, dS_init=dS_init, lin_init=lin_init)
+    dH0 = init.dH_init if init.dH_init is not None else init.dH_fallback
+    dS0 = init.dS_init if init.dS_init is not None else init.dS_fallback
 
     if b1_init is None:
-        b1_init = _intercept_seed(ydata, init["lin_init"], head=True)
+        b1_init = _intercept_seed(ydata, init.lin_init, head=True)
     if b2_init is None:
-        b2_init = _intercept_seed(ydata, init["lin_init"], head=False)
+        b2_init = _intercept_seed(ydata, init.lin_init, head=False)
 
     x_init = np.array([dH0, dS0, *b1_init, *b2_init])  # dH, dS, m1, b1, m2, b2
 
@@ -710,7 +734,7 @@ def fit_full_function(
 
     converged = _check_fit_status(res_lsq)
 
-    dH, dS, m_b, b_b, m_ub, b_ub = res_lsq.x
+    dH, dS, m_b, b_b, m_ub, b_ub = res_lsq.x.tolist()
     dG_37 = dH - (37. - constants.T0) * dS
 
     # median of base lines
@@ -723,7 +747,7 @@ def fit_full_function(
     if return_converged:
         out = (*out, converged)
     if return_errors:
-        cov_HS, note = _dH_dS_covariance(res_lsq, _solver_settings(solver)["loss"])
+        cov_HS, note = _dH_dS_covariance(res_lsq, SolverSettings.of(solver).loss)
         errors = _thermo_error_fields(cov_HS, note)
         errors["SE_Tm"] = (None if cov_HS is None
                            else functions.tm_error(dH, dS, cov_HS, c0, struct_type))
@@ -808,13 +832,13 @@ def fit_full_function_multi(
         raise ValueError("per-curve bounds / lin_init / baseline seeds must "
                          f"have one entry per curve ({n})")
 
-    init = _fit_init_settings({"dH_init": dH_init, "dS_init": dS_init})
-    dH0 = init["dH_init"] if init["dH_init"] is not None else init["dH_fallback"]
-    dS0 = init["dS_init"] if init["dS_init"] is not None else init["dS_fallback"]
+    init = FitInitSettings.of(dH_init=dH_init, dS_init=dS_init)
+    dH0 = init.dH_init if init.dH_init is not None else init.dH_fallback
+    dS0 = init.dS_init if init.dS_init is not None else init.dS_fallback
 
     x_inits = [dH0, dS0]
     for i in range(n):
-        li = _fit_init_settings({"lin_init": lin_list[i]})["lin_init"]
+        li = FitInitSettings.of(lin_init=lin_list[i]).lin_init
         b1 = b1_list[i] if b1_list[i] is not None else _intercept_seed(ds[i], li, head=True)
         b2 = b2_list[i] if b2_list[i] is not None else _intercept_seed(ds[i], li, head=False)
         x_inits.extend([*b1, *b2])
@@ -842,7 +866,8 @@ def fit_full_function_multi(
 
     converged = _check_fit_status(res_lsq)
 
-    dH, dS = res_lsq.x[0], res_lsq.x[1]
+    x = res_lsq.x.tolist()
+    dH, dS = x[0], x[1]
     dG_37 = dH - (37 - constants.T0) * dS
 
     curve_cs = list(cs) if cs is not None and len(cs) else [c0] * len(ds)
@@ -851,9 +876,9 @@ def fit_full_function_multi(
     baselines_hi = []
     T_ms         = []
     y_dats       = []
-    for j, i in enumerate(range(2, len(res_lsq.x), 4)):
-        m_b, b_b    = res_lsq.x[i], res_lsq.x[i + 1]
-        m_ub, b_ub  = res_lsq.x[i + 2], res_lsq.x[i + 3]
+    for j, i in enumerate(range(2, len(x), 4)):
+        m_b, b_b    = x[i], x[i + 1]
+        m_ub, b_ub  = x[i + 2], x[i + 3]
         m_m, b_m    = (m_b + m_ub) / 2, (b_b + b_ub) / 2
         T_m         = functions.tm_from_therm(dH, dS, curve_cs[j], struct_type)
         baselines_lo.append( (m_b, b_b) )
@@ -866,7 +891,7 @@ def fit_full_function_multi(
     if return_converged:
         out = (*out, converged)
     if return_errors:
-        loss = _solver_settings(solver)["loss"]
+        loss = SolverSettings.of(solver).loss
         out = (*out, _thermo_error_fields(*_dH_dS_covariance(res_lsq, loss)))
     return out
 

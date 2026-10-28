@@ -136,8 +136,8 @@ def plot_vant_hoff(axs,
                   fit,
                   T_m,
                   T_scale = 1000.,
-                  K_min = 8,
-                  K_max = 23
+                  #K_min = 8,
+                  #K_max = 23
                   ):
     t_m = T_scale / (T_m - constants.T0)
 
@@ -306,21 +306,12 @@ def plot_function_fit(axs,
     axs.legend(loc="upper left")
 
 
-
 def energy_params(axs, x, y, dG_37, dH, dS):
     axs.text(
         x, y,
         dH_string.format(dH) + "\n" + dS_string.format(dS) + "\n" + dG_string.format(dG_37),
         fontsize=10
     )
-
-
-# ── result-object adapters ─────────────────────────────────────────────────
-#
-# Higher-level entry points that take a typed result from
-# `rnamelt.results` and render it via the building blocks above. Result
-# classes call these via lazy imports so matplotlib stays an opt-in
-# dependency (Pyodide never has to pull it).
 
 
 def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5)):
@@ -372,9 +363,9 @@ def plot_single(curve, *, raw=None, vh=None, fit=None, axes=None, figsize=(15, 5
             t_m = 1000.0 / (vh.Tm - constants.T0)
             axes[1].axvline(t_m, color="red", ls=":",
                             label=f"Tm = {vh.Tm:.2f} °C")
-        if curve.c0:
-            axes[1].axhline(np.log(4 / curve.c0), color="black", ls=":", lw=0.66,
-                            label=r"$\ln(4/C_0)$")
+        if curve.c_eff:
+            axes[1].axhline(-np.log(curve.c_eff), color="black", ls=":", lw=0.66,
+                            label=r"$\ln(1/c_\mathrm{eff})$")
         axes[1].set_xlabel(r"1000 / T [K$^{-1}$]")
         axes[1].set_ylabel(r"$\ln(K)$")
         axes[1].set_title(f"van't Hoff (ΔH = {vh.dH:.2f} kcal/mol)")

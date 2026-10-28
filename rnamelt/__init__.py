@@ -19,11 +19,12 @@ Curves are independent: each carries its own concentration and baseline
 windows (given, or auto-detected when omitted), so a MultiCurves may hold
 curves of different lengths.
 
-Every tunable default lives in one dict: WINDOW_DEFAULTS, SOLVER_DEFAULTS,
-VH_DEFAULTS, FIT_INIT_DEFAULTS, BOUNDS_DEFAULTS, MULTISTART_DEFAULTS and
-RAW_DEFAULTS. Override them per curve with the matching `windows=`,
-`solver=`, `vh=`, `fit_init=`, `bounds=`, `multistart=` and `raw=`
-arguments of SingleCurve, or per call on its analysis methods.
+Every tunable default is a field of one settings class: WindowSettings,
+SolverSettings, VanHoffSettings, FitInitSettings, BoundsSettings,
+MultistartSettings and RawSettings. Override them per curve with the
+matching `windows=`, `solver=`, `vh=`, `fit_init=`, `bounds=`,
+`multistart=` and `raw=` arguments of SingleCurve (an instance or a dict of
+overrides), or per call on its analysis methods.
 """
 
 from rnamelt.api import (
@@ -31,14 +32,15 @@ from rnamelt.api import (
     MultiCurves,
 )
 from rnamelt.methods import (
-    BOUNDS_DEFAULTS,
     BOUNDS_MODES,
-    FIT_INIT_DEFAULTS,
-    MULTISTART_DEFAULTS,
-    RAW_DEFAULTS,
-    SOLVER_DEFAULTS,
-    VH_DEFAULTS,
-    WINDOW_DEFAULTS,
+    SEED_POLICIES,
+    BoundsSettings,
+    FitInitSettings,
+    MultistartSettings,
+    RawSettings,
+    SolverSettings,
+    VanHoffSettings,
+    WindowSettings,
     BaselineWarning,
     ConvergenceWarning,
 )
@@ -67,15 +69,16 @@ __all__ = [
     "ConcDepResult",
     "ConcentrationCurve",
     "ConcentrationSeries",
-    # tunable defaults
-    "SOLVER_DEFAULTS",
-    "VH_DEFAULTS",
-    "FIT_INIT_DEFAULTS",
-    "BOUNDS_DEFAULTS",
+    # settings
+    "SolverSettings",
+    "VanHoffSettings",
+    "FitInitSettings",
+    "BoundsSettings",
+    "MultistartSettings",
+    "RawSettings",
+    "WindowSettings",
     "BOUNDS_MODES",
-    "MULTISTART_DEFAULTS",
-    "RAW_DEFAULTS",
-    "WINDOW_DEFAULTS",
+    "SEED_POLICIES",
     "BaselineWarning",
     "ConvergenceWarning",
 ]

@@ -167,6 +167,7 @@ tailwind.config = {
                             border-radius:4px; background:white; }
   .multi-pill .pill-ct:focus { border-color:var(--accent); outline:none; }
   .multi-pill .pill-badge { font-size:10px; color:var(--muted); font-family:'DM Mono',monospace; }
+  #multiCTGrid:not(.unequal) .multi-ct-b { display:none; }
 
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
   .pulse { animation:pulse 1s infinite; }
@@ -228,9 +229,17 @@ tailwind.config = {
   <!-- ② Concentrations -->
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Concentrations</div>
+    <label class="flex items-center gap-2 text-xs mb-2 cursor-pointer"
+      title="For a heterodimer whose two strands are not in equal amounts: enter strand A and strand B separately">
+      <input type="checkbox" id="unequalCT"> Unequal strand concentrations
+    </label>
     <div id="singleCTBlock">
-      <label class="text-xs font-medium block mb-1">Oligo C<sub>T</sub> <span class="font-mono font-normal text-muted">µM · required</span></label>
+      <label class="text-xs font-medium block mb-1"><span id="ctALabel">Oligo C<sub>T</sub></span> <span class="font-mono font-normal text-muted">µM · required</span></label>
       <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="enter µM">
+      <div id="ctBRow" class="mt-2" style="display:none">
+        <label class="text-xs font-medium block mb-1">Strand B <span class="font-mono font-normal text-muted">µM</span></label>
+        <input type="number" id="CT_B" class="sb-input" step="0.1" min="0" placeholder="enter µM">
+      </div>
     </div>
     <div id="multiCTBlock" style="display:none">
       <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">
@@ -555,7 +564,7 @@ const charts={};
 const colParams = {};
 let   activeCol = null;
 let   dataTRange = {min: null, max: null};
-const PERSISTED_PARAM_IDS = ['fold_low_T','fold_high_T','unf_low_T','unf_high_T','CT'];
+const PERSISTED_PARAM_IDS = ['fold_low_T','fold_high_T','unf_low_T','unf_high_T','CT','CT_B'];
 // Minimum °C between fold_high_T and unf_low_T so the two OLS windows
 // never merge and eat the transition data.
 const BASELINE_MIN_TRANS_GAP = 5.0;
@@ -593,9 +602,9 @@ async function boot() {
 async function applyDefaultPlaceholders() {
   const d = JSON.parse(await pyodide.runPythonAsync(`
 import json
-from rnamelt.methods import VH_DEFAULTS, FIT_INIT_DEFAULTS, BOUNDS_DEFAULTS
-json.dumps({"border": VH_DEFAULTS["border"], "lin_init": FIT_INIT_DEFAULTS["lin_init"],
-            "bounds_mode": BOUNDS_DEFAULTS["mode"]})
+from rnamelt.methods import VanHoffSettings, FitInitSettings, BoundsSettings
+json.dumps({"border": VanHoffSettings().border, "lin_init": FitInitSettings().lin_init,
+            "bounds_mode": BoundsSettings().mode})
 `));
   document.getElementById('advBorder').placeholder  = d.border;
   document.getElementById('advLinInit').placeholder = d.lin_init;
@@ -676,6 +685,24 @@ document.getElementById('runBtn').addEventListener('click', runAnalysis);
 // re-run analysis on commit (change: blur/Enter) so we don't refit on
 // every character. Pill C_T inputs get the same treatment inside
 // buildMultiCTInputs.
+document.getElementById('CT_B').addEventListener('input',  () => snapshotColParams(activeCol));
+document.getElementById('CT_B').addEventListener('change', () => {
+  snapshotColParams(activeCol);
+  if (dfLoaded) runAnalysis();
+});
+
+// Unequal strands: show the strand-B fields (single mode and pills).
+function applyUnequalCT() {
+  const on = document.getElementById('unequalCT').checked;
+  document.getElementById('ctBRow').style.display = on ? '' : 'none';
+  document.getElementById('ctALabel').innerHTML = on ? 'Strand A' : 'Oligo C<sub>T</sub>';
+  document.getElementById('multiCTGrid').classList.toggle('unequal', on);
+}
+document.getElementById('unequalCT').addEventListener('change', () => {
+  applyUnequalCT();
+  if (dfLoaded) runAnalysis();
+});
+
 document.getElementById('CT').addEventListener('input',  () => snapshotColParams(activeCol));
 document.getElementById('CT').addEventListener('change', () => {
   snapshotColParams(activeCol);
@@ -882,6 +909,8 @@ function snapshotColParams(col) {
   if (!singleVisible) {
     const pill = document.querySelector(`.multi-ct[data-col="${col}"]`);
     if (pill) snap.CT = pill.value;
+    const pillB = document.querySelector(`.multi-ct-b[data-col="${col}"]`);
+    if (pillB) snap.CT_B = pillB.value;
   }
   colParams[col] = {...(colParams[col] || {}), ...snap};
 }
@@ -890,9 +919,8 @@ function snapshotColParams(col) {
 // concentrations set during single-mode runs carry over to multi/conc
 // mode without the user re-typing them. Called on mode entry.
 function _syncPillsFromColParams() {
-  document.querySelectorAll('.multi-ct').forEach(el => {
-    const col = el.dataset.col;
-    const ct = colParams[col]?.CT;
+  document.querySelectorAll('.multi-ct, .multi-ct-b').forEach(el => {
+    const ct = colParams[el.dataset.col]?.[el.dataset.key];
     if (ct !== undefined && ct !== '') el.value = ct;
   });
 }
@@ -901,7 +929,7 @@ function defaultColParams() {
   // Blank windows mean "not set yet": ensureWindows() detects them on the
   // curve's first visit. C_T deliberately has no default — the user must
   // supply it.
-  return {fold_low_T: '', fold_high_T: '', unf_low_T: '', unf_high_T: '', CT: ''};
+  return {fold_low_T: '', fold_high_T: '', unf_low_T: '', unf_high_T: '', CT: '', CT_B: ''};
 }
 
 function applyColParams(p) {
@@ -917,7 +945,8 @@ function buildMultiCTInputs(cols) {
   grid.innerHTML = cols.map(c => `
     <div class="multi-pill" data-col="${c}">
       <div class="pill-name" title="${c}">${c}</div>
-      <input type="number" class="multi-ct pill-ct" data-col="${c}" step="0.1" min="0" placeholder="µM">
+      <input type="number" class="multi-ct pill-ct" data-col="${c}" data-key="CT" step="0.1" min="0" placeholder="µM">
+      <input type="number" class="multi-ct-b pill-ct" data-col="${c}" data-key="CT_B" step="0.1" min="0" placeholder="B" title="strand B (µM)">
       <div class="pill-badge">µM</div>
     </div>
   `).join('');
@@ -935,9 +964,9 @@ function buildMultiCTInputs(cols) {
   const savePillCT = (el) => {
     const col = el.dataset.col;
     colParams[col] = colParams[col] || defaultColParams();
-    colParams[col].CT = el.value;
+    colParams[col][el.dataset.key] = el.value;
   };
-  grid.querySelectorAll('.multi-ct').forEach(el => {
+  grid.querySelectorAll('.multi-ct, .multi-ct-b').forEach(el => {
     el.addEventListener('input',  () => savePillCT(el));
     el.addEventListener('change', () => {
       savePillCT(el);
@@ -1186,6 +1215,9 @@ function renderResults(r) {
   const rows = [];
   if (r.TmRaw != null) {
     rows.push(card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C') + blank + blank + blank);
+  } else if (r.raw_error) {
+    // van't Hoff and the fit need the raw baselines, so they were skipped too
+    rows.push(failNote(`Raw Tm failed: ${r.raw_error}`));
   }
   // van't Hoff results — shown even if curve fit failed
   if (vh?.success) {
@@ -1201,7 +1233,9 @@ function renderResults(r) {
       + card('ΔH° (fit)', fit.dH.toFixed(2), seText(fit.SE_dH, 'kcal/mol'), 'kcal/mol')
       + card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), seText(fit.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)')
       + card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), seText(fit.SE_dG, 'kcal/mol'), 'kcal/mol')
-      + seNoteHtml(fit.SE_note));
+      + (fit.converged === false ? convergenceNoteHtml('the fit') : '')
+      + seNoteHtml(fit.SE_note)
+      + seedNoteHtml(fit.seed));
   } else if (fit && fit.success === false) {
     rows.push(failNote(`Curve fit failed: ${fit.error || 'unknown error'}`));
   }
@@ -1265,7 +1299,9 @@ function renderMultiResults(r) {
   html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), seText(r.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)');
   html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), seText(r.SE_dG, 'kcal/mol'), 'kcal/mol');
   html += card('n columns', r.columns.length, null, '');
+  if (r.converged === false) html += convergenceNoteHtml('the multi fit');
   html += seNoteHtml(r.SE_note);
+  html += seedNoteHtml(r.seed);
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
@@ -1297,7 +1333,7 @@ function renderConcentrationResults(r) {
   r.per_curve.forEach((c, i) => {
     const color = multiPalette[i % multiPalette.length];
     meltSets.push({
-      label: `${c.name} · ${c.oligoC} µM`,
+      label: `${c.name} · ${c.oligoC}${c.oligoC_B != null ? ' / ' + c.oligoC_B : ''} µM`,
       data: zip(r.T_all, c.signal_all),
       borderColor: color,
       borderWidth: 3,
@@ -1364,6 +1400,10 @@ function renderConcentrationResults(r) {
   // ── Result cards: one row per Tm extraction (raw / vH / fit) ──────────
   const fmtCard = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
   let html = '';
+  const notConverged = r.per_curve.filter(c => c.converged === false).map(c => c.name);
+  if (notConverged.length) {
+    html += convergenceNoteHtml(`the fit of ${notConverged.join(', ')}`);
+  }
   ['raw', 'vh', 'fit'].forEach(key => {
     const s = series[key];
     const meta = methodMeta[key];
@@ -1393,13 +1433,13 @@ function renderConcentrationResults(r) {
   document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map(c => `
     <tr>
       <td>${c.name}</td>
-      <td>${c.oligoC}</td>
+      <td>${c.oligoC}${c.oligoC_B != null ? ' / ' + c.oligoC_B : ''}</td>
       <td>${(+c.lnCT).toFixed(4)}</td>
       <td>${fmtT(c.TmRaw)}</td>
       <td>${fmtIT(c.TmRaw_K ?? c.TmKelvin)}</td>
       <td>${fmtT(c.TmvH)}</td>
       <td>${fmtIT(c.TmvH_K)}</td>
-      <td>${fmtT(c.Tmfit)}</td>
+      <td${c.converged === false ? ' title="fit not converged"' : ''}>${fmtT(c.Tmfit)}${c.converged === false ? ' ⚠' : ''}</td>
       <td>${fmtIT(c.Tmfit_K)}</td>
     </tr>`).join('');
 
@@ -1450,6 +1490,7 @@ function accumulateColumnResult(r) {
     // conc mode can tell whether the cache is still valid before reusing.
     windows: Array.isArray(r.baseline_windows) ? [...r.baseline_windows] : null,
     settingsKey: r._settingsKey ?? null,
+    concKey: JSON.stringify([r.oligoC ?? null, r.oligoC_B ?? null]),
     base_b_r:  r.base_b_r  || null,
     base_ub_r: r.base_ub_r || null,
   };
@@ -1504,6 +1545,17 @@ function seText(se, unit, scale = 1, digits = 2) {
 // Full-width muted line explaining a missing / approximate error.
 function seNoteHtml(note) {
   return note ? `<div class="col-span-full text-xs font-mono text-muted" style="grid-column:1/-1">Standard error: ${note}</div>` : '';
+}
+// Full-width amber line: the solver stopped at its evaluation limit.
+function convergenceNoteHtml(what) {
+  return `<div class="col-span-full text-xs font-mono text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" style="grid-column:1/-1">Not converged: ${what} stopped at the solver's evaluation limit, so the values may be off. Check the baseline windows and the starting values.</div>`;
+}
+// Full-width muted line: where the fit's ΔH / ΔS starting values came from.
+function seedNoteHtml(seed) {
+  if (!seed) return '';
+  const src = {user: 'your value', vh: "van't Hoff", fallback: 'default', multistart: 'multistart'};
+  const from = k => src[seed[k]] ?? seed[k];
+  return `<div class="col-span-full text-xs font-mono text-muted" style="grid-column:1/-1">Started from ΔH ${(+seed.dH).toFixed(1)} kcal/mol (${from('dH_from')}), ΔS ${(seed.dS * 1000).toFixed(1)} cal/(mol·K) (${from('dS_from')})</div>`;
 }
 
 function card(label,value,err,unit){
@@ -1595,7 +1647,7 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     lines.push('');
     lines.push(`# concentration series (struct=${cr.struct_type}, self_complementary=${cr.self_complementary}, f=${f})`);
     lines.push([
-      'column','CT_uM','CT_M','ln_CT_over_f',
+      'column','CT_uM','CT_B_uM','CT_M','ln_CT_over_f',
       'Tm_raw_C','inv_Tm_raw_K',
       'Tm_vH_C','inv_Tm_vH_K',
       'Tm_fit_C','inv_Tm_fit_K',
@@ -1604,6 +1656,7 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       lines.push([
         `"${c.name.replace(/"/g, '""')}"`,
         cell(c.oligoC),
+        cell(c.oligoC_B),
         cell(c.c0),
         cell(c.lnCT),
         cell(c.TmRaw),    invK(c.TmRaw_K ?? c.TmKelvin),
@@ -1815,6 +1868,9 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   document.getElementById('colSection').style.display = 'none';
   document.getElementById('multiCTGrid').innerHTML = '';
   document.getElementById('CT').value='';
+  document.getElementById('CT_B').value='';
+  document.getElementById('unequalCT').checked = false;
+  applyUnequalCT();
   updateCTBlocks();
   // Windows and slider.
   _QR_INPUTS.forEach(id => { document.getElementById(id).value=''; });
@@ -1842,7 +1898,6 @@ function collectParams() {
   const isConc  = col === '__concentration__';
   const isPerCol = isMulti || isConc;
   const params={
-    signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
     struct_type:     document.querySelector('input[name="structType"]:checked')?.value  || 'heterodimer',
     column:          isMulti ? '__multi__' : isConc ? '__concentration__' : col,
     ...advancedParams(),
@@ -1850,13 +1905,17 @@ function collectParams() {
   // C_T is required — no silent fallback. Missing values become null and
   // the bridge raises "params['oligo'] is required" so the user sees a
   // clear "please enter µM" message.
+  // Unequal strands: [A, B] when B is filled in, otherwise equal strands.
+  const unequal = document.getElementById('unequalCT').checked;
+  const conc = (a, b) => (unequal && Number.isFinite(b) && b > 0) ? [a, b] : a;
   const oligoSingle = g('CT');
-  if (oligoSingle != null) params.oligo = oligoSingle;
+  if (oligoSingle != null) params.oligo = conc(oligoSingle, g('CT_B'));
   if (isPerCol) {
     const oligoMulti = {};
     document.querySelectorAll('.multi-ct').forEach(el => {
       const v = parseFloat(el.value);
-      if (Number.isFinite(v) && v > 0) oligoMulti[el.dataset.col] = v;
+      const b = parseFloat(document.querySelector(`.multi-ct-b[data-col="${el.dataset.col}"]`)?.value);
+      if (Number.isFinite(v) && v > 0) oligoMulti[el.dataset.col] = conc(v, b);
     });
     params.oligo_multi = oligoMulti;
     // Snapshot whatever's currently on the sidebar into the active pill's
@@ -1893,10 +1952,13 @@ function collectParams() {
         ];
         if (!_windowsMatch(cached.windows, currentWindow)) continue;
         if (cached.settingsKey !== settingsKey(params)) continue;
+        const o = oligoMulti[col];
+        if (cached.concKey !== JSON.stringify(Array.isArray(o) ? o : [o, null])) continue;
         precomputedTms[col] = {
           Tm_raw: cached.TmRaw,
           Tm_vH:  cached.vh?.T_m_vH ?? null,
           Tm_fit: cached.fit?.T_m_fit ?? null,
+          converged: cached.fit?.converged ?? null,
           base_b:  cached.base_b_r  ?? null,
           base_ub: cached.base_ub_r ?? null,
         };
@@ -1970,13 +2032,14 @@ function _qrInputs(){
 }
 
 function _clampAndOrder(vals){
-  // vals: [fl, fh, ul, uh] as numbers. Enforce fl < fh < ul < uh with a
-  // BASELINE_MIN_TRANS_GAP °C floor between fh and ul. Small nudges only.
+  // vals: [fl, fh, ul, uh] as numbers. Enforce fl <= fh < ul <= uh with a
+  // BASELINE_MIN_TRANS_GAP °C floor between fh and ul. Equal edges are a
+  // zero-width window: a flat baseline where the plateau is missing.
   let [fl, fh, ul, uh] = vals;
   const g = BASELINE_MIN_TRANS_GAP;
-  if (fh <= fl) fh = fl + 0.1;
+  if (fh < fl) fh = fl;
   if (ul <= fh + g) ul = fh + g;
-  if (uh <= ul) uh = ul + 0.1;
+  if (uh < ul) uh = ul;
   return [fl, fh, ul, uh];
 }
 

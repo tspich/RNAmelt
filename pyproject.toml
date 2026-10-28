@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rnamelt"
-version = "0.1.1"
+version = "0.2.0"
 description = "Two-state thermodynamic analysis (ΔH, ΔS, ΔG, Tm) of RNA melting curves"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,10 +43,20 @@ Issues = "https://github.com/tspich/RNAmelt/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["rnamelt"]
+# Local backup and experimental detectors: kept in the repository for the
+# scripts, not shipped.
+exclude = [
+    "rnamelt/old_api.py",
+    "rnamelt/auto_baseline_tests.py",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "rnamelt",
     "README.md",
     "pyproject.toml",
+]
+exclude = [
+    "rnamelt/old_api.py",
+    "rnamelt/auto_baseline_tests.py",
 ]

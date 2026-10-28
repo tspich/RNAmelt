@@ -23,9 +23,8 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     # Drop rows where temperature is missing
     df = df.dropna(subset=[df.columns[0]])
 
-    # Note: Should be the case anyway
-    ## Sort by temperature ascending
-    #df = df.sort_values(df.columns[0]).reset_index(drop=True)
+    # Sort by temperature ascending
+    df = df.sort_values(df.columns[0]).reset_index(drop=True)
 
     # Rename columns for clarity
     cols = [df.columns[0]] + list(df.columns[1:])

@@ -30,7 +30,11 @@ Units
                kcal²/(mol²·K). None when undefined, SE_note says why
                (it may also carry a caveat alongside values)
     c0         M, total strand concentration
-    oligoC     uM, per-strand concentration
+    oligoC     uM, per-strand concentration (strand A when unequal)
+    oligoC_B   uM, strand B when the strands are not in equal amounts
+    c_eff      M, effective concentration: K(Tm) = 1/c_eff; C_T/4 for a
+               heterodimer, C_T for a homodimer, max − min/2 for unequal
+               strands. The concentration series regresses 1/Tm vs ln c_eff
     baselines  (slope, intercept), signal units per degree C
 """
 
@@ -120,6 +124,8 @@ class GlobalFitCurve(NamedTuple):
     T_used:     Optional[np.ndarray]          = None
     signal:     Optional[np.ndarray]          = None
     signal_all: Optional[np.ndarray]          = None
+    oligoC_B:   Optional[float]               = None    # strand B (uM) if unequal
+    c_eff:      Optional[float]               = None    # M, K(Tm) = 1/c_eff
 
 class GlobalFit(NamedTuple):
     """Return value of `MultiCurves.global_fit()` — one ΔH/ΔS for all curves."""
@@ -165,6 +171,9 @@ class ConcentrationCurve(NamedTuple):
     signal_all: Optional[np.ndarray]          = None
     base_b:     Optional[tuple[float, float]] = None
     base_ub:    Optional[tuple[float, float]] = None
+    oligoC_B:   Optional[float]               = None    # strand B (uM) if unequal
+    c_eff:      Optional[float]               = None    # M; lnCT = ln(c_eff)
+    converged:  Optional[bool]                = None    # fit stopped before max_nfev; None if no fit
 
     @staticmethod
     def _to_K(T_C: Optional[float]) -> Optional[float]:

@@ -138,10 +138,12 @@ tailwind.config = {
           <li>Choose the structure type: <em>Heterodimer</em> (two different strands), <em>Homodimer</em> (self-complementary) or <em>Monomer</em> (hairpin).</li>
           <li>Pick a signal column, or one of the multi-column modes: <code>multi (shared ΔH fit)</code> or <code>concentration series</code>.</li>
           <li>Enter the oligo concentration C<sub>T</sub> in µM — per strand, required for dimers. In the multi-column modes each column gets its own C<sub>T</sub> pill.</li>
+          <li>If the two strands of a heterodimer are not in equal amounts, tick <strong>Unequal strand concentrations</strong> and enter strand A and strand B separately (on each pill in the multi-column modes). The folded fraction then refers to the limiting strand, and T<sub>m</sub> uses the effective concentration max(A, B) − min(A, B)/2. A blank B means equal strands.</li>
           <li>Check the baseline windows (see below). Each curve's windows are detected automatically the first time you open it; adjust them if needed.</li>
           <li>Click <strong>▶ Run analysis</strong>. Three Tm estimates are returned: raw (baseline intersection), van't Hoff linearisation, and the full non-linear two-state fit.</li>
         </ol>
-        <p>If an analysis fails — for example when the fit cannot place the transition inside the fitted temperature range — the reason is shown instead of numbers. Adjust the baseline windows and run again.</p>
+        <p>If an analysis fails — for example when the fit cannot place the transition inside the fitted temperature range — the reason is shown instead of numbers. Adjust the baseline windows and run again. When the raw T<sub>m</sub> fails, the van't Hoff analysis and the fit are skipped too, because they start from its baselines.</p>
+        <p>Under the fit results, a line shows where the fit's ΔH and ΔS starting values came from: your value, the van't Hoff estimate, the default, or multistart. In the browser the solver stops after 500 evaluations. A fit that reaches this limit is still shown, with an amber <strong>Not converged</strong> note: its values may be off, so check the baseline windows and the starting values. In a concentration series the note names the curves concerned, and their fit T<sub>m</sub> is marked ⚠ in the per-curve table.</p>
 
         <h3 id="windows">Baseline windows</h3>
         <p>Four temperatures (°C) define the analysis, set with the four-handle slider or typed into the boxes:</p>
@@ -155,6 +157,7 @@ tailwind.config = {
         </table>
         <ul class="disc">
           <li>Every curve gets its own windows. They are <strong>detected automatically</strong> the first time a curve is shown: the first column on file load, each column when you select it, and every curve when you enter a multi-column mode. Windows you have set are kept when you come back to a curve.</li>
+          <li>If a plateau is missing from the scan, drag the two handles of that baseline together: a zero-width window gives a flat baseline at the signal measured there.</li>
           <li>If detection fails, windows at the scan edges are used and an amber warning names the curve. Check those windows; the warning disappears once you edit them.</li>
           <li><strong>⚙ Auto detect</strong> re-detects the curve being edited. In the multi-column modes, <strong>⚙ Detect all baselines</strong> re-detects every curve; click a C<sub>T</sub> pill to inspect or edit that curve's windows. When re-detection fails, windows you already had are kept.</li>
         </ul>
@@ -252,11 +255,13 @@ if f.ok:
 else:
     print(f.error)</code></pre>
         <p>Data and concentration are all a default run needs. Baseline windows are detected automatically, and the fit is seeded from the van't Hoff estimate.</p>
+        <p>For a heterodimer whose two strands are not in equal amounts, give both strand concentrations as a pair (µM). The folded fraction then refers to the limiting strand, and T<sub>m</sub> uses the effective concentration <code>c.c_eff</code> (see <a class="inline" href="#model">Two-state model</a>):</p>
+<pre><code>c = SingleCurve(T, signal, oligoC=(0.5, 1.0))   # strand A, strand B</code></pre>
 
         <h3 id="api-windows">Baseline windows</h3>
 <pre><code>c = SingleCurve(T, signal, oligoC=0.5,
                 fold_low_T=15, fold_high_T=35, unf_low_T=70, unf_high_T=90)</code></pre>
-        <p>Give all four temperatures or none; they must satisfy <code>fold_low_T &lt; fold_high_T ≤ unf_low_T &lt; unf_high_T</code>. When omitted they are detected (<code>c.window_source == "auto"</code>); if detection fails, edge windows of <code>windows["fallback_width"]</code> °C are used and a <code>BaselineWarning</code> is issued (<code>"fallback"</code>). <code>c.auto_baselines()</code> returns the detected windows without changing the curve.</p>
+        <p>Give all four temperatures or none; they must satisfy <code>fold_low_T ≤ fold_high_T &lt; unf_low_T ≤ unf_high_T</code>. Equal edges make a zero-width window: a flat baseline at the signal measured at that temperature, the best guess when a plateau is missing (raw T<sub>m</sub> and van't Hoff use it; the full fit still fits both baselines). When omitted they are detected (<code>c.window_source == "auto"</code>); if detection fails, edge windows of <code>windows["fallback_width"]</code> °C are used and a <code>BaselineWarning</code> is issued (<code>"fallback"</code>). <code>c.auto_baselines()</code> returns the detected windows without changing the curve.</p>
 
         <h3 id="api-multi">MultiCurves — several curves</h3>
 <pre><code>from rnamelt import SingleCurve, MultiCurves
@@ -278,17 +283,17 @@ cdr.per_curve, cdr.skipped</code></pre>
         <p>Each curve keeps its own concentration, windows and settings, and curves may differ in length. All curves must share one <code>struct_type</code>.</p>
 
         <h3 id="api-settings">Settings</h3>
-        <p>Every tunable default lives in one dict exported from <code>rnamelt</code>:</p>
+        <p>Every tunable default is a field of one settings class (a frozen dataclass) exported from <code>rnamelt</code>; plain dicts are accepted as overrides:</p>
         <table>
           <thead><tr><th>Argument</th><th>Defaults</th><th>Controls</th></tr></thead>
           <tbody>
-            <tr><td><code>windows</code></td><td><code>WINDOW_DEFAULTS</code></td><td><code>detector</code> options for baseline detection, <code>fallback_width</code></td></tr>
-            <tr><td><code>solver</code></td><td><code>SOLVER_DEFAULTS</code></td><td><code>scipy.optimize.least_squares</code> options: <code>max_nfev</code>, tolerances, <code>loss</code>, <code>f_scale</code>, <code>x_scale</code>, …</td></tr>
-            <tr><td><code>vh</code></td><td><code>VH_DEFAULTS</code></td><td>van't Hoff: <code>border</code> (θ range kept), <code>t1_min</code> / <code>t1_max</code>, <code>T_scale</code></td></tr>
-            <tr><td><code>fit_init</code></td><td><code>FIT_INIT_DEFAULTS</code></td><td>starting values: <code>seed_from</code>, <code>dH_init</code>, <code>dS_init</code>, <code>lin_init</code>, <code>b1_init</code>, <code>b2_init</code>, fallbacks and plausible ranges</td></tr>
-            <tr><td><code>bounds</code></td><td><code>BOUNDS_DEFAULTS</code></td><td><code>mode</code> (baseline slopes: <code>physical</code> · <code>loose</code> · <code>positive</code> · <code>unbounded</code>), <code>dH</code> / <code>dS</code> boxes, <code>slope_cap_k</code>, <code>Tm_margin</code></td></tr>
-            <tr><td><code>multistart</code></td><td><code>MULTISTART_DEFAULTS</code></td><td><code>dH_seeds</code>, <code>fwhm_factors</code>, <code>seed_Tm_K</code>, <code>min_abs_dH</code></td></tr>
-            <tr><td><code>raw</code></td><td><code>RAW_DEFAULTS</code></td><td><code>edge_skip</code> for the raw-Tm crossing search</td></tr>
+            <tr><td><code>windows</code></td><td><code>WindowSettings</code></td><td><code>detector</code> options for baseline detection, <code>fallback_width</code></td></tr>
+            <tr><td><code>solver</code></td><td><code>SolverSettings</code></td><td><code>scipy.optimize.least_squares</code> options: <code>max_nfev</code>, tolerances, <code>loss</code>, <code>f_scale</code>, <code>x_scale</code>, …</td></tr>
+            <tr><td><code>vh</code></td><td><code>VanHoffSettings</code></td><td>van't Hoff: <code>border</code> (θ range kept), <code>t1_min</code> / <code>t1_max</code>, <code>T_scale</code></td></tr>
+            <tr><td><code>fit_init</code></td><td><code>FitInitSettings</code></td><td>starting values: <code>seed_from</code>, <code>dH_init</code>, <code>dS_init</code>, <code>lin_init</code>, <code>b1_init</code>, <code>b2_init</code>, fallbacks and plausible ranges</td></tr>
+            <tr><td><code>bounds</code></td><td><code>BoundsSettings</code></td><td><code>mode</code> (baseline slopes: <code>physical</code> · <code>loose</code> · <code>positive</code> · <code>unbounded</code>), <code>dH</code> / <code>dS</code> boxes, <code>slope_cap_k</code>, <code>Tm_margin</code></td></tr>
+            <tr><td><code>multistart</code></td><td><code>MultistartSettings</code></td><td><code>dH_seeds</code>, <code>fwhm_factors</code>, <code>seed_Tm_K</code>, <code>min_abs_dH</code></td></tr>
+            <tr><td><code>raw</code></td><td><code>RawSettings</code></td><td><code>edge_skip</code> for the raw-Tm crossing search</td></tr>
           </tbody>
         </table>
         <p>Pass a partial dict <strong>per curve</strong> (validated when the curve is built — typos raise <code>ValueError</code>) or <strong>per call</strong> (applies to that call only):</p>
@@ -347,6 +352,11 @@ fig, axes = plots.plot_concentration(m.conc_dependency())</code></pre>
           T<sub>m</sub> = ΔH / (ΔS + R·ln(C<sub>T</sub>/f)),  f = 4 (hetero), 1 (homo);  T<sub>m</sub> = ΔH / ΔS (monomer)
         </div>
         <p>ΔH, ΔS and ΔG refer to <strong>folding</strong>, so ΔH and ΔS are negative for a stable duplex. C<sub>T</sub> is the total strand concentration: 2 × the per-strand concentration for a heterodimer, 1 × for a homodimer.</p>
+        <p>Unequal strands (heterodimer, strands A and B): C<sub>T</sub> = A + B, θ is the fraction of the limiting strand in the duplex, and</p>
+        <div class="formula">
+          T<sub>m</sub> = ΔH / (ΔS + R·ln c<sub>eff</sub>),  c<sub>eff</sub> = max(A, B) − min(A, B) / 2
+        </div>
+        <p>With equal strands c<sub>eff</sub> = C<sub>T</sub>/4, which recovers the formula above. The concentration series regresses 1/T<sub>m</sub> against ln c<sub>eff</sub>.</p>
         <p>Units: ΔH in kcal/mol, ΔS in kcal/(mol·K), ΔG in kcal/mol at 37 °C. Tm is reported in °C; the model works in K (<code>T_K = T_C + 273.15</code>).</p>
       </section>
 

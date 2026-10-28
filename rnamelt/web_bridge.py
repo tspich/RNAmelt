@@ -15,8 +15,9 @@ Entry points:
 Params dict (JS → Python):
     struct_type      : "heterodimer" | "homodimer" | "monomer"
     column           : signal column name, or "__multi__" / "__concentration__"
-    oligo            : per-strand µM  (single-column mode)
-    oligo_multi      : {column: µM, ...}  (multi / concentration modes)
+    oligo            : per-strand µM, or [A, B] for a heterodimer whose
+                       strands are not in equal amounts (single-column mode)
+    oligo_multi      : {column: µM or [A, B], ...}  (multi / concentration modes)
     fold_low_T       : °C, outer edge of the folded baseline window
     fold_high_T      : °C, inner edge of the folded baseline window
     unf_low_T        : °C, inner edge of the unfolded baseline window
@@ -81,7 +82,7 @@ _MULTI_SENTINEL = "__multi__"
 _CONC_SENTINEL  = "__concentration__"
 
 # Cap the nonlinear-fit iteration count for browser workloads. The API's
-# SOLVER_DEFAULTS uses max_nfev=1e12 (effectively unlimited) which is fine
+# SolverSettings uses max_nfev=1e12 (effectively unlimited) which is fine
 # on a workstation but locks Pyodide up on real UV curves — especially in
 # concentration mode where fit_full_function runs once per curve. 500
 # iterations is enough for a well-behaved two-state fit; a fit that needs
@@ -134,11 +135,15 @@ def _run_single(df: pd.DataFrame, params: Mapping[str, Any],
         "is_concentration": False,
         "column":           column,
         "c0":               curve.c0,
+        "oligoC":           curve.oligoC,
+        "oligoC_B":         curve.oligoC_B,
+        "c_eff":            curve.c_eff,
         "T_all":            T_all,
         "signal_all":       signal_all,
         "T_used":           T_used,
         "signal_used":      signal_used,
         "TmRaw":            raw.Tm if raw.ok else None,
+        "raw_error":        None if raw.ok else raw.error,
         "base_b_r":         raw.base_b  if raw.ok else None,
         "base_ub_r":        raw.base_ub if raw.ok else None,
         "vantHoff":         _vh_payload(vh),
@@ -229,6 +234,7 @@ def _fit_payload(fit, T_used, signal_used) -> dict | None:
         # derivative of the measured signal in the fit window (plotted with the fit)
         "derivative": -np.gradient(signal_used, T_used),
         "converged":  fit.converged,
+        "seed":       fit.seed,
         **_errors_payload(fit),
         "SE_Tm":      fit.SE_Tm,
     }
@@ -255,7 +261,9 @@ def _run_multi(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
         columns.append({
             "name":       c.name,
             "oligoC":     c.oligoC,
+            "oligoC_B":   c.oligoC_B,
             "c0":         c.c0,
+            "c_eff":      c.c_eff,
             "T_m_fit":    c.Tm,
             "base_b_f":   list(c.base_b)  if c.base_b  is not None else None,
             "base_ub_f":  list(c.base_ub) if c.base_ub is not None else None,
@@ -276,6 +284,7 @@ def _run_multi(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
         "dS":               gf.dS,
         "dG":               gf.dG,
         "converged":        gf.converged,
+        "seed":             gf.seed,
         **_errors_payload(gf),
         "columns":          columns,
     }
@@ -291,7 +300,8 @@ def _run_concentration(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
     # single-mode runs, pass them through so conc_dependency doesn't redo
     # the fit for those curves. Caller vouches that the cache matches the
     # current baseline windows.
-    precomputed = params.get("precomputed_tms")
+    precomputed = {name: _clean_cache(entry)
+                   for name, entry in (params.get("precomputed_tms") or {}).items()}
     cdr = ms.conc_dependency(precomputed_tms=precomputed,
                              strategy=_strategy(params))
 
@@ -309,7 +319,9 @@ def _run_concentration(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
         per_curve.append({
             "name":       c.name,
             "oligoC":     c.oligoC,
+            "oligoC_B":   c.oligoC_B,
             "c0":         c.c0,
+            "c_eff":      c.c_eff,
             "lnCT":       c.lnCT,
             "TmRaw":      c.Tm_raw,
             "TmvH":       c.Tm_vH,
@@ -317,6 +329,7 @@ def _run_concentration(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
             "TmRaw_K":    c.Tm_raw_K,
             "TmvH_K":     c.Tm_vH_K,
             "Tmfit_K":    c.Tm_fit_K,
+            "converged":  c.converged,
             "T_used":     c.T_used,
             "signal":     c.signal,
             "signal_all": c.signal_all,
@@ -341,6 +354,27 @@ def _run_concentration(df: pd.DataFrame, params: Mapping[str, Any]) -> dict:
         "error":              cdr.error,
     }
     return safe_json(payload)
+
+
+def _finite_or_none(v) -> float | None:
+    """v as a float, or None for JSON nulls and non-numeric / non-finite values."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if np.isfinite(f) else None
+
+
+def _clean_cache(entry: Mapping[str, Any]) -> dict:
+    """One precomputed_tms entry from JS, with unusable values as None."""
+    clean = {k: _finite_or_none(entry.get(k)) for k in ("Tm_raw", "Tm_vH", "Tm_fit")}
+    for k in ("base_b", "base_ub"):
+        v = entry.get(k)
+        pair = [_finite_or_none(x) for x in v] if isinstance(v, (list, tuple)) and len(v) == 2 else [None]
+        clean[k] = None if None in pair else tuple(pair)
+    conv = entry.get("converged")
+    clean["converged"] = conv if isinstance(conv, bool) else None
+    return clean
 
 
 def _series_payload(s) -> dict | None:
@@ -387,42 +421,26 @@ def _extract_column(df: pd.DataFrame, column: str) -> tuple[np.ndarray,
     return T, S
 
 
-def _validate_oligo(name: str, v) -> float:
-    """Coerce ``v`` to a float and require it to be finite and > 0.
-    The UI removed the default C_T value on purpose (users must supply
-    it), so a missing / non-positive / NaN value here is a real error
-    that should be surfaced with a helpful message instead of silently
-    propagating NaN through the fit."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        raise ValueError(f"{name} must be a positive number; got {v!r}")
-    if not np.isfinite(f) or f <= 0:
-        raise ValueError(f"{name} must be a positive finite number; got {f}")
-    return f
-
-
-def _get_oligo(params: Mapping[str, Any]) -> float:
+def _get_oligo(params: Mapping[str, Any]):
+    """The single-mode concentration as sent (µM or [A, B]); SingleCurve
+    validates it."""
     v = params.get("oligo")
     if v is None:
         raise ValueError(
             "params['oligo'] is required in single-column mode "
             "(enter C_T µM in the sidebar)"
         )
-    return _validate_oligo("oligo", v)
+    return v
 
 
-def _get_oligo_multi(params: Mapping[str, Any]) -> dict[str, float]:
+def _get_oligo_multi(params: Mapping[str, Any]) -> dict:
     v = params.get("oligo_multi")
     if not isinstance(v, dict) or not v:
         raise ValueError(
             "params['oligo_multi'] is required and must be a "
             "{column: µM, ...} dict in multi / concentration mode"
         )
-    out = {}
-    for k, vv in v.items():
-        out[str(k)] = _validate_oligo(f"oligo_multi[{k!r}]", vv)
-    return out
+    return {str(k): vv for k, vv in v.items()}
 
 
 _WINDOW_KEYS = ("fold_low_T", "fold_high_T", "unf_low_T", "unf_high_T")
@@ -462,7 +480,7 @@ def _strategy(params: Mapping[str, Any]) -> str:
 
 def _build_curve(T: np.ndarray, S: np.ndarray,
                  params: Mapping[str, Any], name: str,
-                 oligoC: float) -> SingleCurve:
+                 oligoC) -> SingleCurve:
     """Build one SingleCurve from the JS param bag. Window temperatures that
     are present are passed through; with none, SingleCurve auto-detects."""
     # Merge web-side solver caps with any user-supplied overrides. Caps win

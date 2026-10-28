@@ -10,11 +10,6 @@ def linear_res(x, T, y):
     return linear(T, *x) - y
 
 def fit_linear(T, d, minT, maxT):
-    # Locate the window [start, stop] with defensive clamps. When a caller
-    # supplies a boundary just above/below the scan (e.g. a JS toFixed(1)
-    # rounding a T[-1]=89.6999969 up to 89.7) the naive `next()` raises
-    # StopIteration with an empty message and blows up the whole pipeline
-    # silently. Clamp gracefully instead.
     start = next((i for i, v in enumerate(T) if v >= minT), None)
     if start is None:
         raise ValueError(
@@ -63,17 +58,7 @@ def intersect_lin(m, b, xs, ys, edge_skip=10):
     return x, linear(x, m, b)
 
 def full_function(T, dH, dS, m1, b1, m2, b2, c0 = 1e-6, struct_type='heterodimer'):
-    if struct_type == 'heterodimer':
-        theta = theta_from_therm(T, dH, dS, c0)
-    elif struct_type == 'homodimer':
-        theta = theta_from_therm_homo(T, dH, dS, c0)
-    elif struct_type == 'monomer':
-        theta = theta_from_therm_mono(T, dH, dS)
-    else:
-        raise ValueError(
-            f"unknown struct_type {struct_type!r}; "
-            f"valid: 'heterodimer', 'homodimer', 'monomer'"
-        )
+    theta = folded_fraction(T, dH, dS, c0, struct_type)
     return theta * (m1 * T + b1) + (1 - theta) * (m2 * T + b2)
 
 def full_function_res(x, T, y, c0 = 1e-6, struct_type = 'heterodimer'):
@@ -83,7 +68,6 @@ def full_function_res(x, T, y, c0 = 1e-6, struct_type = 'heterodimer'):
 def full_function_multi(temps, *args, **kwargs):
     default_c0 = 1e-6
     default_struct_type = 'heterodimer'
-    # prepare variables and constants
     f = []
     m1s = []
     b1s = []
@@ -91,10 +75,8 @@ def full_function_multi(temps, *args, **kwargs):
     b2s = []
 
     c0 = kwargs.get("c0", default_c0)
-    # just in case, c0 is None
     if not c0:
         c0 = default_c0
-    # collect arguments
     dH = args[0][0]
     dS = args[0][1]
 
@@ -104,27 +86,14 @@ def full_function_multi(temps, *args, **kwargs):
         m2s.append(args[0][i + 2])
         b2s.append(args[0][i + 3])
 
-    # create default concentrations if not specified differently
     default_cs = [ c0 for _ in range(len(m1s)) ]
     cs = kwargs.get("cs", default_cs)
     if not cs:
         cs = default_cs
 
     struct_type = kwargs.get('struct_type', default_struct_type)
-    # compose result function fit
     for i, c in enumerate(cs):
-        if struct_type == 'heterodimer':
-            theta = theta_from_therm(temps[i], dH, dS, c)
-        elif struct_type == 'homodimer':
-            theta = theta_from_therm_homo(temps[i], dH, dS, c)
-        elif struct_type == 'monomer':
-            theta = theta_from_therm_mono(temps[i], dH, dS)
-        else:
-            raise ValueError(
-                f"unknown struct_type {struct_type!r}; "
-                f"valid: 'heterodimer', 'homodimer', 'monomer'"
-            )
-
+        theta = folded_fraction(temps[i], dH, dS, c, struct_type)
         f.append(theta * (m1s[i] * temps[i] + b1s[i]) + (1 - theta) * (m2s[i] * temps[i] + b2s[i]))
 
     return f
@@ -137,31 +106,80 @@ def full_function_multi_res(x, temps, ys, **kwargs):
         for y, f in zip(ys, fits)
     ])
 
-# Equilibrium constant of folding at the melting temperature (θ = 1/2),
-# in units of 1/c0 for the bimolecular cases:
-#   heterodimer  A + B ⇌ AB : K = 2θ / (c0 (1-θ)²)  →  K(Tm) = 4 / c0
-#   homodimer    2A ⇌ A₂    : K = θ / (2 c0 (1-θ)²) →  K(Tm) = 1 / c0
-#   monomer      A ⇌ A*     : K = θ / (1-θ)         →  K(Tm) = 1
-_K_AT_TM_FACTOR = {"heterodimer": 4.0, "homodimer": 1.0}
+
+def _conc(c0, struct_type):
+    """The concentration in the form each model uses: (c_A, c_B) in M for a
+    heterodimer, the total c0 for a homodimer, None for a monomer."""
+    pair = np.size(c0) == 2
+    if struct_type == 'heterodimer':
+        return (float(c0[0]), float(c0[1])) if pair else (0.5 * c0, 0.5 * c0)
+    if pair:
+        raise ValueError(f"unequal strand concentrations only apply to "
+                         f"heterodimers, not struct_type={struct_type!r}")
+    if struct_type == 'homodimer':
+        return c0
+    if struct_type == 'monomer':
+        return None
+    raise ValueError(f"unknown struct_type {struct_type!r}; "
+                     f"valid: 'heterodimer', 'homodimer', 'monomer'")
+
+
+def c_eff(c0, struct_type='heterodimer'):
+    """Effective concentration (M) with K(Tm) = 1/c_eff, i.e.
+    Tm = ΔH / (ΔS + R·ln c_eff); None for a monomer."""
+    c = _conc(c0, struct_type)
+    if struct_type == 'heterodimer':
+        a, b = c
+        return max(a, b) - 0.5 * min(a, b)
+    return c
+
+
+def folded_fraction(T, dH, dS, c0=1e-6, struct_type='heterodimer'):
+    """Folded fraction θ(T) of the two-state model (T in °C, ΔH in kcal/mol,
+    ΔS in kcal/(mol·K)); written in 1/K so it stays finite at both ends."""
+    c = _conc(c0, struct_type)
+    tt = T - constants.T0
+    with np.errstate(over='ignore', divide='ignore', invalid='ignore'):
+        inv_K = np.exp((dH - tt * dS) / (constants.R * tt))
+        if struct_type == 'monomer':
+            return 1.0 / (1.0 + inv_K)
+        if struct_type == 'homodimer':
+            # θ = (s − 1)/(s + 1) with s = √(1 + 8 c0 K), written in r = 1/s
+            r = 1.0 / np.sqrt(1.0 + 8.0 * c / inv_K)
+            return (1.0 - r) / (1.0 + r)
+        # [AB] = 2 c_A c_B / (S + √(S² − 4 c_A c_B)), S = c_A + c_B + 1/K,
+        # with the discriminant written without cancellation
+        a, b = c
+        disc = (a - b) ** 2 + inv_K * (2.0 * (a + b) + inv_K)
+        AB = 2.0 * a * b / (a + b + inv_K + np.sqrt(disc))
+        return AB / min(a, b)
+
+
+def ln_k_from_theta(theta, c0, struct_type='heterodimer'):
+    """ln K of the folding equilibrium from the folded fraction θ
+    (the inverse of folded_fraction at one temperature)."""
+    c = _conc(c0, struct_type)
+    if struct_type == 'monomer':
+        return np.log(theta / (1.0 - theta))
+    if struct_type == 'homodimer':
+        return np.log(theta / (2.0 * c * (1.0 - theta) ** 2))
+    a, b = c
+    m = min(a, b)
+    return np.log(theta * m / ((a - theta * m) * (b - theta * m)))
 
 
 def _tm_denominator(dS, c0, struct_type):
-    """ΔS + R·ln(c0/f) (ΔS for a monomer): Tm_K = ΔH / this."""
+    """ΔS + R·ln c_eff (ΔS for a monomer): Tm_K = ΔH / this."""
     if struct_type == 'monomer':
         return dS
-    if struct_type in _K_AT_TM_FACTOR:
-        return dS + constants.R * np.log(c0 / _K_AT_TM_FACTOR[struct_type])
-    raise ValueError(
-        f"unknown struct_type {struct_type!r}; "
-        f"valid: 'heterodimer', 'homodimer', 'monomer'"
-    )
+    return dS + constants.R * np.log(c_eff(c0, struct_type))
 
 
 def tm_from_therm(dH, dS, c0=1e-6, struct_type='heterodimer'):
     """Model melting temperature (°C) where the folded fraction θ is 1/2.
 
-    dH in kcal/mol, dS in kcal/(mol·K), c0 = total strand concentration (M).
-    Solves ΔH − Tm·ΔS = −R·Tm·ln K(Tm) for Tm.
+    dH in kcal/mol, dS in kcal/(mol·K), c0 = total strand concentration (M)
+    or (c_A, c_B) per strand (M). Solves ΔH − Tm·ΔS = −R·Tm·ln K(Tm) for Tm.
     """
     return dH / _tm_denominator(dS, c0, struct_type) + constants.T0
 
@@ -170,28 +188,10 @@ def tm_error(dH: float, dS: float, cov_HS, c0: float = 1e-6,
              struct_type: str = 'heterodimer') -> float:
     """Standard error (°C = K) of the model Tm from the 2×2 covariance of
     (ΔH [kcal/mol], ΔS [kcal/(mol·K)]), by the delta method on
-    Tm = ΔH / D with D = ΔS + R·ln(c0/f)."""
+    Tm = ΔH / D with D = ΔS + R·ln c_eff."""
     D = _tm_denominator(dS, c0, struct_type)
     g = np.array([1.0 / D, -dH / D**2])
     return float(np.sqrt(max(g @ np.asarray(cov_HS, dtype=float) @ g, 0.0)))
-
-
-def theta_from_therm(T, dH, dS, c0 = 1e-6):
-    tt    = T - constants.T0
-    dG    = dH - tt * dS
-    term = np.sqrt(2 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
-    return (term - 1) / (term + 1)
-
-def theta_from_therm_homo(T, dH, dS, c0 = 1e-6):
-    tt    = T - constants.T0
-    dG    = dH - tt * dS
-    term = np.sqrt(8 * c0 * np.exp(- dG / (constants.R * tt)) + 1)
-    return (term - 1) / (term + 1)
-
-def theta_from_therm_mono(T, dH, dS):
-    tt    = T - constants.T0
-    dG    = dH - tt * dS
-    return np.exp(- dG / (constants.R * tt))/(1+np.exp(- dG / (constants.R * tt)))
 
 
 def thermo_cov_from_regression(slope: float, intercept: float, cov_ab) -> np.ndarray:
