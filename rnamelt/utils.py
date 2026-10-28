@@ -2,9 +2,9 @@
 utils.py — shared helpers for RNA melting analysis.
 """
 
-import numpy as np
+import math
 
-#R = 8.314  # J/(mol·K)
+import numpy as np
 
 
 def celsius_to_kelvin(T_celsius):
@@ -23,8 +23,9 @@ def safe_json(obj):
         return [safe_json(v) for v in obj]
     if isinstance(obj, np.integer):
         return int(obj)
-    if isinstance(obj, np.floating):
-        return None if np.isnan(obj) else float(obj)
+    if isinstance(obj, (float, np.floating)):
+        v = float(obj)
+        return v if math.isfinite(v) else None
     if isinstance(obj, np.ndarray):
         return [safe_json(x) for x in obj.tolist()]
     if isinstance(obj, Exception):

@@ -10,6 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas2svg@1.0.16/canvas2svg.min.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -107,6 +108,67 @@ tailwind.config = {
   }
   .dual-range input[type=range]::-moz-range-track { background:transparent; }
 
+  /* Quad-range: four handles on one T-axis. Three coloured bands show
+     folded / transition / unfolded regions; outside is greyed. */
+  .quad-range { position:relative; height:28px; }
+  .quad-range .qr-track {
+    position:absolute; left:0; right:0; top:13px; height:3px;
+    background:var(--border); border-radius:2px;
+  }
+  .quad-range .qr-band {
+    position:absolute; top:11px; height:7px; border-radius:2px; pointer-events:none;
+  }
+  .quad-range .qr-fold  { background:rgba(85,85,85,0.28); }
+  .quad-range .qr-trans { background:rgba(200,180,120,0.22); }
+  .quad-range .qr-unf   { background:rgba(213,94,0,0.28); }
+  .quad-range input[type=range] {
+    position:absolute; left:0; right:0; top:0; width:100%; height:28px;
+    -webkit-appearance:none; appearance:none; background:transparent; pointer-events:none; margin:0;
+  }
+  .quad-range input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none; pointer-events:auto;
+    width:14px; height:14px; border-radius:50%;
+    background:#fff; border:2px solid var(--accent);
+    cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.15);
+  }
+  .quad-range input[type=range]::-moz-range-thumb {
+    pointer-events:auto;
+    width:14px; height:14px; border-radius:50%;
+    background:#fff; border:2px solid var(--accent);
+    cursor:pointer;
+  }
+  .quad-range input[type=range]::-moz-range-track { background:transparent; }
+
+  /* Outer-only mode (multi curves): global fit ignores the inner OLS
+     boundaries, so hide the two inner handles, the two inner number inputs,
+     and the folded/unfolded band strips. The transition band gets stretched
+     to represent the fit window [fold_lo, unf_hi] instead. */
+  #baselineSection.qr-outer-only #qrFoldHi,
+  #baselineSection.qr-outer-only #qrUnfLo,
+  #baselineSection.qr-outer-only #qrFoldBand,
+  #baselineSection.qr-outer-only #qrUnfBand,
+  #baselineSection.qr-outer-only [data-bl-role="inner"] { display:none; }
+  #baselineSection.qr-outer-only .qr-trans { background:rgba(85,85,85,0.20); }
+
+  /* Per-curve pill selector (multi / concentration mode). Click a pill
+     to route the sidebar's baseline-window handles to that curve. */
+  .multi-pill {
+    display:flex; align-items:center; gap:6px;
+    padding:6px 10px; border:1px solid var(--border); border-radius:6px;
+    cursor:pointer; transition:border-color .15s, background .15s;
+    background:white;
+  }
+  .multi-pill:hover  { border-color:var(--accent); }
+  .multi-pill.active { border-color:var(--accent); background:rgba(0,157,150,0.06); }
+  .multi-pill .pill-name  { flex:1; font-family:'DM Mono',monospace; font-size:11px;
+                            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .multi-pill .pill-ct    { width:56px; padding:2px 6px; font-size:11px;
+                            text-align:right; border:1px solid var(--border);
+                            border-radius:4px; background:white; }
+  .multi-pill .pill-ct:focus { border-color:var(--accent); outline:none; }
+  .multi-pill .pill-badge { font-size:10px; color:var(--muted); font-family:'DM Mono',monospace; }
+  #multiCTGrid:not(.unequal) .multi-ct-b { display:none; }
+
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
   .pulse { animation:pulse 1s infinite; }
   .pulse-fast { animation:pulse .7s infinite; }
@@ -167,85 +229,141 @@ tailwind.config = {
   <!-- ② Concentrations -->
   <div class="px-5 py-4 border-b border-border">
     <div class="sb-section-title">Concentrations</div>
-    <div id="singleCTBlock" class="grid grid-cols-2 gap-2">
-      <div>
-        <label class="text-xs font-medium block mb-1">Oligo C<sub>T</sub> <span class="font-mono font-normal text-muted">µM</span></label>
-        <input type="number" id="CT" class="sb-input" step="0.1" min="0" value="0.5">
-      </div>
-      <div>
-        <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
-        <input type="number" id="saltConc" class="sb-input" step="1" min="0" value="150">
+    <label class="flex items-center gap-2 text-xs mb-2 cursor-pointer"
+      title="For a heterodimer whose two strands are not in equal amounts: enter strand A and strand B separately">
+      <input type="checkbox" id="unequalCT"> Unequal strand concentrations
+    </label>
+    <div id="singleCTBlock">
+      <label class="text-xs font-medium block mb-1"><span id="ctALabel">Oligo C<sub>T</sub></span> <span class="font-mono font-normal text-muted">µM · required</span></label>
+      <input type="number" id="CT" class="sb-input" step="0.1" min="0" placeholder="enter µM">
+      <div id="ctBRow" class="mt-2" style="display:none">
+        <label class="text-xs font-medium block mb-1">Strand B <span class="font-mono font-normal text-muted">µM</span></label>
+        <input type="number" id="CT_B" class="sb-input" step="0.1" min="0" placeholder="enter µM">
       </div>
     </div>
     <div id="multiCTBlock" style="display:none">
-      <div class="grid grid-cols-2 gap-2 mb-2">
-        <div></div>
-        <div>
-          <label class="text-xs font-medium block mb-1">Salt <span class="font-mono font-normal text-muted">mM NaCl</span></label>
-          <input type="number" id="saltConcMulti" class="sb-input" step="1" min="0" value="150">
-        </div>
+      <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">
+        Per-column C<sub>T</sub> (µM) <span class="normal-case tracking-normal font-normal text-muted">— click a pill to edit its baselines</span>
       </div>
-      <div class="text-xs font-semibold uppercase tracking-wider text-muted mb-1">Per-column C<sub>T</sub> (µM)</div>
-      <div id="multiCTGrid" class="grid grid-cols-2 gap-2"></div>
+      <div id="multiCTGrid" class="grid grid-cols-1 gap-1.5 mb-2"></div>
+      <button id="detectAllBtn"
+        class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-gray-50 transition"
+        title="Run auto-detect once per curve on its raw signal and store each result in that curve's colParams">
+        ⚙ Detect all baselines
+      </button>
     </div>
     <div class="text-xs font-mono text-muted mt-2">C<sub>T</sub> also adds a point to the 1/T<sub>m</sub> vs ln[C<sub>T</sub>] plot</div>
   </div>
 
-  <!-- ③ Temperature window -->
-  <div class="px-5 py-4 border-b border-border">
-    <div class="sb-section-title">Temperature window <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
-    <div class="grid grid-cols-2 gap-2 mb-3">
-      <div>
-        <label class="text-xs font-medium block mb-1">T<sub>low</sub></label>
-        <input type="number" id="T_low" class="sb-input" step="0.5" placeholder="auto">
-      </div>
-      <div>
-        <label class="text-xs font-medium block mb-1">T<sub>high</sub></label>
-        <input type="number" id="T_high" class="sb-input" step="0.5" placeholder="auto">
-      </div>
+  <!-- ③ Baseline windows -->
+  <div id="baselineSection" class="px-5 py-4 border-b border-border">
+    <div class="sb-section-title">Baseline windows <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
+    <div id="baselineSlider" class="quad-range mb-3" style="display:none">
+      <div class="qr-track"></div>
+      <div class="qr-band qr-fold"  id="qrFoldBand"></div>
+      <div class="qr-band qr-trans" id="qrTransBand"></div>
+      <div class="qr-band qr-unf"   id="qrUnfBand"></div>
+      <input type="range" id="qrFoldLo" step="0.1">
+      <input type="range" id="qrFoldHi" step="0.1">
+      <input type="range" id="qrUnfLo"  step="0.1">
+      <input type="range" id="qrUnfHi"  step="0.1">
     </div>
-    <div id="tRangeSlider" class="dual-range" style="display:none">
-      <div class="dr-track"></div>
-      <div class="dr-fill" id="trFill"></div>
-      <input type="range" id="trMin" step="0.5">
-      <input type="range" id="trMax" step="0.5">
-    </div>
-    <div class="text-xs font-mono text-muted mt-2">Only this range is used for fitting</div>
-  </div>
-
-  <!-- ④ Baseline offsets -->
-  <div class="px-5 py-4 border-b border-border">
-    <div class="sb-section-title">Baseline offsets <span class="text-accent normal-case tracking-normal font-mono font-normal">(°C)</span></div>
     <div class="grid grid-cols-2 gap-2 mb-2">
-      <div>
-        <label class="text-xs font-medium block mb-1">Lower offset</label>
-        <input type="number" id="bl_lower_offset" class="sb-input" step="1" value="10">
+      <div data-bl-role="outer">
+        <label class="text-xs font-medium block mb-1">fold<sub>lo</sub></label>
+        <input type="number" id="fold_low_T" class="sb-input" step="0.1" placeholder="auto">
       </div>
-      <div>
-        <label class="text-xs font-medium block mb-1">Upper offset</label>
-        <input type="number" id="bl_upper_offset" class="sb-input" step="1" value="10">
+      <div data-bl-role="inner">
+        <label class="text-xs font-medium block mb-1">fold<sub>hi</sub></label>
+        <input type="number" id="fold_high_T" class="sb-input" step="0.1" placeholder="auto">
+      </div>
+      <div data-bl-role="inner">
+        <label class="text-xs font-medium block mb-1">unf<sub>lo</sub></label>
+        <input type="number" id="unf_low_T" class="sb-input" step="0.1" placeholder="auto">
+      </div>
+      <div data-bl-role="outer">
+        <label class="text-xs font-medium block mb-1">unf<sub>hi</sub></label>
+        <input type="number" id="unf_high_T" class="sb-input" step="0.1" placeholder="auto">
       </div>
     </div>
+    <button id="autoBaselinesBtn"
+      class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold hover:bg-gray-50 transition mb-2"
+      title="Detect baseline windows automatically (uses the currently selected column)">
+      ⚙ Auto detect
+    </button>
     <div class="text-xs font-mono text-muted leading-relaxed">
-      Lower bl: T &lt; T<sub>low</sub> − offset<br>
-      Upper bl: T &gt; T<sub>high</sub> + offset
+      Fit window : [fold<sub>lo</sub>, unf<sub>hi</sub>]<br>
+      <span data-bl-role="inner">Folded OLS : [fold<sub>lo</sub>, fold<sub>hi</sub>]<br></span>
+      <span data-bl-role="inner">Unfolded OLS: [unf<sub>lo</sub>, unf<sub>hi</sub>]</span>
     </div>
   </div>
 
-  <!-- ⑥ Run / Auto / Reset -->
+  <!-- ④ Advanced analysis settings (one set for every curve) -->
+  <details id="advancedSection" class="px-5 py-4 border-b border-border">
+    <summary class="sb-section-title cursor-pointer select-none" style="margin-bottom:0">Advanced</summary>
+    <div class="mt-3">
+      <div class="text-xs text-muted mb-2">Blank = default. Applies to every curve.</div>
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advBorder">van't Hoff border</label>
+          <input type="number" id="advBorder" class="sb-input adv-input" step="0.01" min="0" max="0.49"
+            title="Fraction of θ trimmed at each end of the van't Hoff regression (0–0.5)">
+        </div>
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advLinInit">lin_init <span class="font-mono font-normal text-muted">pts</span></label>
+          <input type="number" id="advLinInit" class="sb-input adv-input" step="1" min="1"
+            title="Number of first / last points averaged to seed the baseline intercepts">
+        </div>
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advDHInit">ΔH start <span class="font-mono font-normal text-muted">kcal/mol</span></label>
+          <input type="number" id="advDHInit" class="sb-input adv-input" step="1"
+            title="Starting ΔH (folding, negative). Blank: van't Hoff estimate">
+        </div>
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advDSInit">ΔS start <span class="font-mono font-normal text-muted">cal/(mol·K)</span></label>
+          <input type="number" id="advDSInit" class="sb-input adv-input" step="1"
+            title="Starting ΔS (folding, negative). Blank: van't Hoff estimate">
+        </div>
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advBoundsMode">Baseline slopes</label>
+          <select id="advBoundsMode" class="sb-input adv-input"
+            title="physical: |slopes| capped from the data · loose: folded slope ≥ 0 · positive: both ≥ 0 · unbounded: free">
+            <option value="">default</option>
+            <option value="physical">physical</option>
+            <option value="loose">loose</option>
+            <option value="positive">positive</option>
+            <option value="unbounded">unbounded</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium block mb-1" for="advStrategy">Fit strategy</label>
+          <select id="advStrategy" class="sb-input adv-input"
+            title="multistart: one fit per ΔH seed, lowest residual wins (slower). Not used by the multi (shared ΔH) fit.">
+            <option value="">default</option>
+            <option value="single">single</option>
+            <option value="multistart">multistart</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- ⑤ Run / Reset to defaults / Clear -->
   <div class="px-5 py-4 border-b border-border">
     <button id="runBtn" disabled
       class="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed mb-2">
       ▶ Run analysis
     </button>
     <div class="flex gap-2">
-      <button id="autoBtn" disabled title="Reset parameters to defaults"
+      <button id="defaultsBtn" disabled
+        title="Re-detect the current curve's baseline windows and reset the Advanced settings (C_T is kept)"
         class="flex-1 flex items-center justify-center px-3 py-1.5 rounded-lg border border-border text-xs font-mono text-muted transition hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed">
-        ↺ Auto
+        ↺ Reset to defaults
       </button>
-      <button id="resetBtn"
+      <button id="clearBtn"
+        title="Remove the data, all concentrations, windows, settings and results"
         class="flex-1 flex items-center justify-center px-3 py-1.5 rounded-lg border border-border text-xs font-mono text-accent2 transition hover:border-accent2">
-        ✕ Reset
+        ✕ Clear
       </button>
     </div>
   </div>
@@ -280,6 +398,7 @@ tailwind.config = {
     <span id="runningText">Running…</span>
   </div>
   <div id="errorBanner"   class="hidden mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm"></div>
+  <div id="warnBanner"    class="hidden mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm"></div>
   <div id="infoBanner"    class="hidden mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm"></div>
 
   <!-- Upload -->
@@ -414,8 +533,8 @@ tailwind.config = {
       </button>
       <button id="downloadPlotsBtn"
         class="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-semibold transition hover:opacity-90"
-        title="Download each visible chart as a PNG (capturing current zoom / pan state)">
-        ⬇ Download plots (PNG)
+        title="Download each visible chart as an SVG vector image (capturing current zoom / pan state)">
+        ⬇ Download plots (SVG)
       </button>
     </div>
 
@@ -432,8 +551,9 @@ const PYTHON_MODULES = [
   { path: 'rnamelt/utils.py' },
   { path: 'rnamelt/results.py' },
   { path: 'rnamelt/cleaning.py' },
-  { path: 'rnamelt/analysis_melting.py' },
+  { path: 'rnamelt/auto_baseline.py' },
   { path: 'rnamelt/api.py' },
+  { path: 'rnamelt/web_bridge.py' },
 ];
 
 let pyodide=null, dfLoaded=false, lastResult=null, vhoffPoints=[], lastConcResult=null;
@@ -444,7 +564,14 @@ const charts={};
 const colParams = {};
 let   activeCol = null;
 let   dataTRange = {min: null, max: null};
-const PERSISTED_PARAM_IDS = ['T_low','T_high','bl_lower_offset','bl_upper_offset','CT'];
+const PERSISTED_PARAM_IDS = ['fold_low_T','fold_high_T','unf_low_T','unf_high_T','CT','CT_B'];
+// Minimum °C between fold_high_T and unf_low_T so the two OLS windows
+// never merge and eat the transition data.
+const BASELINE_MIN_TRANS_GAP = 5.0;
+// Advanced panel inputs: one global set of analysis settings, not per curve.
+const ADV_IDS = ['advBorder','advLinInit','advDHInit','advDSInit','advBoundsMode','advStrategy'];
+// The quad slider's listeners are bound once, not on every file load.
+let sliderBound = false;
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -461,12 +588,30 @@ async function boot() {
       pyodide.FS.writeFile('/'+mod.path, await res.text());
     }
     await pyodide.runPythonAsync(`import sys; sys.path.insert(0,'/')`);
+    await applyDefaultPlaceholders();
     setStatus('ready','Ready');
     enableUpload();
   } catch(e) {
     setStatus('error','Boot failed');
     showError(e.message);
   }
+}
+
+// Show the API defaults as placeholders in the Advanced panel, so a blank
+// field visibly means "default" and the numbers have one home (methods.py).
+async function applyDefaultPlaceholders() {
+  const d = JSON.parse(await pyodide.runPythonAsync(`
+import json
+from rnamelt.methods import VanHoffSettings, FitInitSettings, BoundsSettings
+json.dumps({"border": VanHoffSettings().border, "lin_init": FitInitSettings().lin_init,
+            "bounds_mode": BoundsSettings().mode})
+`));
+  document.getElementById('advBorder').placeholder  = d.border;
+  document.getElementById('advLinInit').placeholder = d.lin_init;
+  document.getElementById('advDHInit').placeholder  = "van't Hoff";
+  document.getElementById('advDSInit').placeholder  = "van't Hoff";
+  document.querySelector('#advBoundsMode option[value=""]').textContent = `default (${d.bounds_mode})`;
+  document.querySelector('#advStrategy option[value=""]').textContent   = 'default (single)';
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -518,26 +663,231 @@ json.dumps({'rows':int(_df_global.shape[0]),'cols':int(_df_global.shape[1]),
     Object.keys(colParams).forEach(k => delete colParams[k]);
     dataTRange = {min: info.T_min, max: info.T_max};
     activeCol  = sel.value;
-    setIfEmpty('T_low',  (info.T_min).toFixed(1));
-    setIfEmpty('T_high', (info.T_max).toFixed(1));
-    initTRangeSlider(info.T_min, info.T_max);
+    _QR_INPUTS.forEach(id => { document.getElementById(id).value = ''; });
+    initBaselineSlider(info.T_min, info.T_max);
     document.getElementById('uploadSection').style.display = 'none';
     document.getElementById('resultsSection').classList.remove('hidden');
-    document.getElementById('runBtn').disabled  = false;
-    document.getElementById('autoBtn').disabled = false;
-    hideRunning(); await runAnalysis();
+    document.getElementById('runBtn').disabled      = false;
+    document.getElementById('defaultsBtn').disabled = false;
+    hideRunning();
+    // First visit to a curve: detect its baseline windows.
+    await ensureWindows([activeCol]);
+    applyColParams(colParams[activeCol] || defaultColParams());
+    await runAnalysis();
   } catch(e) { hideRunning(); showError('Error loading file: '+e.message); console.error(e); }
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 document.getElementById('runBtn').addEventListener('click', runAnalysis);
-document.getElementById('colSelect').addEventListener('change', () => {
-  const newCol = document.getElementById('colSelect').value;
-  // Save the column we're leaving, then restore (or seed defaults for) the new one.
+
+// Single-mode C_T: store the value into colParams[activeCol] on every
+// keystroke (input) so it's ALWAYS persisted the moment it's set. Only
+// re-run analysis on commit (change: blur/Enter) so we don't refit on
+// every character. Pill C_T inputs get the same treatment inside
+// buildMultiCTInputs.
+document.getElementById('CT_B').addEventListener('input',  () => snapshotColParams(activeCol));
+document.getElementById('CT_B').addEventListener('change', () => {
   snapshotColParams(activeCol);
-  applyColParams(colParams[newCol] || defaultColParams());
-  if (!colParams[newCol]) snapshotColParams(newCol);
-  activeCol = newCol;
+  if (dfLoaded) runAnalysis();
+});
+
+// Unequal strands: show the strand-B fields (single mode and pills).
+function applyUnequalCT() {
+  const on = document.getElementById('unequalCT').checked;
+  document.getElementById('ctBRow').style.display = on ? '' : 'none';
+  document.getElementById('ctALabel').innerHTML = on ? 'Strand A' : 'Oligo C<sub>T</sub>';
+  document.getElementById('multiCTGrid').classList.toggle('unequal', on);
+}
+document.getElementById('unequalCT').addEventListener('change', () => {
+  applyUnequalCT();
+  if (dfLoaded) runAnalysis();
+});
+
+document.getElementById('CT').addEventListener('input',  () => snapshotColParams(activeCol));
+document.getElementById('CT').addEventListener('change', () => {
+  snapshotColParams(activeCol);
+  if (dfLoaded) runAnalysis();
+});
+
+// ── Baseline-window detection ─────────────────────────────────────────────────
+// Re-fetch and reload the Python modules so edits take effect without a
+// page reload (dev hot-reload). Order matters: dependencies first.
+async function refreshPython() {
+  for (const mod of PYTHON_MODULES) {
+    const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) pyodide.FS.writeFile('/'+mod.path, await res.text());
+  }
+  await pyodide.runPythonAsync(`
+import importlib
+import rnamelt.utils, rnamelt.methods, rnamelt.functions, rnamelt.cleaning
+import rnamelt.auto_baseline, rnamelt.api, rnamelt.web_bridge
+importlib.reload(rnamelt.utils); importlib.reload(rnamelt.functions)
+importlib.reload(rnamelt.methods); importlib.reload(rnamelt.cleaning)
+importlib.reload(rnamelt.auto_baseline); importlib.reload(rnamelt.api)
+importlib.reload(rnamelt.web_bridge)
+`);
+}
+
+// Detect one curve's windows. Returns the bridge reply: {ok, source
+// ("auto" | "fallback"), fold_low_T, …, warning?} or {ok: false, error}.
+async function detectWindows(col) {
+  pyodide.globals.set('_ab_params_json', JSON.stringify({column: col}));
+  const raw = await pyodide.runPythonAsync(`
+import json
+import rnamelt.web_bridge as _wb
+json.dumps(_wb.auto_baseline_windows(_df_global, json.loads(_ab_params_json)), allow_nan=False)
+`);
+  return JSON.parse(raw);
+}
+
+function hasWindows(col) {
+  const p = colParams[col];
+  return !!p && _QR_INPUTS.every(id => Number.isFinite(parseFloat(p[id])));
+}
+
+// Store a detection result in colParams[col], keeping its C_T. A fallback
+// keeps its warning until the user edits that curve's windows.
+function storeWindows(col, r) {
+  colParams[col] = {
+    ...(colParams[col] || defaultColParams()),
+    fold_low_T:  (+r.fold_low_T).toFixed(2),
+    fold_high_T: (+r.fold_high_T).toFixed(2),
+    unf_low_T:   (+r.unf_low_T).toFixed(2),
+    unf_high_T:  (+r.unf_high_T).toFixed(2),
+    windowWarning: r.source === 'fallback' ? (r.warning || 'baseline detection failed') : null,
+  };
+}
+
+// Auto-detect by default: detect every curve in `cols` that has no
+// windows yet. Curves the user has already set keep theirs.
+async function ensureWindows(cols) {
+  const todo = cols.filter(c => c && !hasWindows(c));
+  if (!todo.length) return;
+  showRunning(todo.length > 1 ? `Detecting baselines for ${todo.length} curves…`
+                              : 'Detecting baselines…');
+  try {
+    await refreshPython();
+    for (const col of todo) {
+      const r = await detectWindows(col);
+      if (r.ok) storeWindows(col, r);
+      else showError(`Baseline detection for ${col}: ${r.error}`);
+    }
+  } catch(e) {
+    showError('Baseline detection error: '+e.message);
+    console.error(e);
+  } finally {
+    hideRunning();
+  }
+}
+
+// Re-detect on request. A curve that already has windows keeps them when
+// detection fails; returns the failure message, or null.
+async function redetect(col, {keepOnFallback}) {
+  const r = await detectWindows(col);
+  if (!r.ok) return `${col}: ${r.error}`;
+  if (r.source === 'fallback' && keepOnFallback && hasWindows(col)) {
+    return `${r.warning} — windows unchanged`;
+  }
+  storeWindows(col, r);
+  return null;
+}
+
+// The four windows were edited by hand: drop the curve's fallback warning.
+function onWindowsEdited() {
+  if (colParams[activeCol]) colParams[activeCol].windowWarning = null;
+}
+
+// Amber banner listing the curves in play that run on fallback windows.
+function renderWindowWarnings() {
+  const b = document.getElementById('warnBanner');
+  const cols = _isPerColMode()
+    ? [...document.querySelectorAll('.multi-pill')].map(p => p.dataset.col)
+    : [activeCol];
+  const msgs = dfLoaded ? cols.map(c => colParams[c]?.windowWarning).filter(Boolean) : [];
+  if (!msgs.length) { b.classList.add('hidden'); return; }
+  b.textContent = '⚠ ' + msgs.join('  ·  ') + ' — check these windows.';
+  b.classList.remove('hidden');
+}
+
+function _isPerColMode() {
+  const v = document.getElementById('colSelect').value;
+  return v === '__multi__' || v === '__concentration__';
+}
+
+document.getElementById('autoBaselinesBtn').addEventListener('click', async () => {
+  if (!dfLoaded || !activeCol) return;
+  const btn = document.getElementById('autoBaselinesBtn');
+  hideError(); showRunning('Detecting baselines…');
+  btn.disabled = true;
+  try {
+    await refreshPython();
+    snapshotColParams(activeCol);
+    const failed = await redetect(activeCol, {keepOnFallback: true});
+    if (failed) { showError(`Auto detect failed: ${failed}`); return; }
+    applyColParams(colParams[activeCol]);
+    await runAnalysis();
+  } catch(e) {
+    showError('Auto detect error: '+e.message);
+    console.error(e);
+  } finally {
+    hideRunning();
+    btn.disabled = false;
+  }
+});
+
+// Detect all baselines: re-detect every curve of the multi / concentration
+// run, then re-run once.
+document.getElementById('detectAllBtn').addEventListener('click', async () => {
+  if (!dfLoaded) return;
+  const btn  = document.getElementById('detectAllBtn');
+  const cols = [...document.querySelectorAll('.multi-pill')].map(p => p.dataset.col);
+  if (!cols.length) return;
+  hideError(); showRunning(`Detecting baselines for ${cols.length} curves…`);
+  btn.disabled = true;
+  const failed = [];
+  try {
+    await refreshPython();
+    snapshotColParams(activeCol);
+    for (const col of cols) {
+      const f = await redetect(col, {keepOnFallback: true});
+      if (f) failed.push(f);
+    }
+    if (colParams[activeCol]) applyColParams(colParams[activeCol]);
+    await runAnalysis();
+    if (failed.length) showError(`Detect all: ${failed.join('  ·  ')}`);
+  } catch(e) {
+    showError('Detect all error: '+e.message);
+    console.error(e);
+  } finally {
+    hideRunning();
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('colSelect').addEventListener('change', async () => {
+  const newSel = document.getElementById('colSelect').value;
+  // Save whichever column the sidebar was tracking before the switch.
+  snapshotColParams(activeCol);
+  if (newSel === '__multi__' || newSel === '__concentration__') {
+    // In multi / concentration mode, activeCol tracks the CURRENTLY-EDITED
+    // curve (the highlighted pill), not the sentinel. Populate pill C_T
+    // inputs from any per-column CT already set during single-mode runs so
+    // the user doesn't have to re-enter concentrations.
+    _syncPillsFromColParams();
+    const cols = [...document.querySelectorAll('.multi-pill')].map(p => p.dataset.col);
+    await ensureWindows(cols);
+    const firstCol = cols[0];
+    if (firstCol) {
+      applyColParams(colParams[firstCol] || defaultColParams());
+      activeCol = firstCol;
+      _highlightMultiPill(firstCol);
+    }
+  } else {
+    // Single mode: activeCol is the actual signal column.
+    await ensureWindows([newSel]);
+    applyColParams(colParams[newSel] || defaultColParams());
+    activeCol = newSel;
+  }
   updateCTBlocks();
   runAnalysis();
 });
@@ -548,71 +898,142 @@ function snapshotColParams(col) {
   PERSISTED_PARAM_IDS.forEach(id => {
     snap[id] = document.getElementById(id).value;
   });
-  colParams[col] = snap;
+  // Read CT from whichever input is currently VISIBLE to the user. This
+  // matters during mode transitions: the colSelect.value has already
+  // flipped to '__concentration__' by the time this handler fires, but
+  // updateCTBlocks() hasn't run yet, so singleCTBlock is still visible
+  // and #CT is still the source of truth for the outgoing column's CT.
+  // Using colSelect.value here would incorrectly read the empty pill,
+  // wiping out the CT the user just typed in single mode.
+  const singleVisible = document.getElementById('singleCTBlock')?.style.display !== 'none';
+  if (!singleVisible) {
+    const pill = document.querySelector(`.multi-ct[data-col="${col}"]`);
+    if (pill) snap.CT = pill.value;
+    const pillB = document.querySelector(`.multi-ct-b[data-col="${col}"]`);
+    if (pillB) snap.CT_B = pillB.value;
+  }
+  colParams[col] = {...(colParams[col] || {}), ...snap};
+}
+
+// Populate every pill C_T input from its column's colParams[col].CT so
+// concentrations set during single-mode runs carry over to multi/conc
+// mode without the user re-typing them. Called on mode entry.
+function _syncPillsFromColParams() {
+  document.querySelectorAll('.multi-ct, .multi-ct-b').forEach(el => {
+    const ct = colParams[el.dataset.col]?.[el.dataset.key];
+    if (ct !== undefined && ct !== '') el.value = ct;
+  });
 }
 
 function defaultColParams() {
-  const fmt = v => (v == null ? '' : (+v).toFixed(1));
-  return {
-    T_low:           fmt(dataTRange.min),
-    T_high:          fmt(dataTRange.max),
-    bl_lower_offset: '10',
-    bl_upper_offset: '10',
-    CT:              '0.5',
-  };
+  // Blank windows mean "not set yet": ensureWindows() detects them on the
+  // curve's first visit. C_T deliberately has no default — the user must
+  // supply it.
+  return {fold_low_T: '', fold_high_T: '', unf_low_T: '', unf_high_T: '', CT: '', CT_B: ''};
 }
 
 function applyColParams(p) {
   PERSISTED_PARAM_IDS.forEach(id => {
     document.getElementById(id).value = p[id] ?? '';
   });
-  // Sync the dual-range slider after T_low / T_high change.
-  ['T_low','T_high'].forEach(id => {
-    document.getElementById(id).dispatchEvent(new Event('change'));
-  });
+  // Sync the quad-range slider handles to the new number-input values.
+  syncBaselineSliderFromInputs();
 }
 
 function buildMultiCTInputs(cols) {
   const grid = document.getElementById('multiCTGrid');
   grid.innerHTML = cols.map(c => `
-    <div>
-      <label class="text-xs font-medium block mb-1 font-mono">${c}</label>
-      <input type="number" class="sb-input multi-ct" data-col="${c}" step="0.1" min="0" value="0.5">
+    <div class="multi-pill" data-col="${c}">
+      <div class="pill-name" title="${c}">${c}</div>
+      <input type="number" class="multi-ct pill-ct" data-col="${c}" data-key="CT" step="0.1" min="0" placeholder="µM">
+      <input type="number" class="multi-ct-b pill-ct" data-col="${c}" data-key="CT_B" step="0.1" min="0" placeholder="B" title="strand B (µM)">
+      <div class="pill-badge">µM</div>
     </div>
   `).join('');
+  // Delegated click: pill → select that curve for baseline editing.
+  // Clicks inside the CT input propagate up but we ignore them there so
+  // the user can still type / spin freely.
+  grid.onclick = (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    const pill = e.target.closest('.multi-pill');
+    if (pill) _onMultiPillClick(pill.dataset.col);
+  };
+  // Persist pill C_T edits IMMEDIATELY (input, every keystroke) so the
+  // value is stored the moment it's set; re-run analysis only on commit
+  // (change: blur/Enter/arrows) so the fit doesn't refit on every character.
+  const savePillCT = (el) => {
+    const col = el.dataset.col;
+    colParams[col] = colParams[col] || defaultColParams();
+    colParams[col][el.dataset.key] = el.value;
+  };
+  grid.querySelectorAll('.multi-ct, .multi-ct-b').forEach(el => {
+    el.addEventListener('input',  () => savePillCT(el));
+    el.addEventListener('change', () => {
+      savePillCT(el);
+      if (dfLoaded) runAnalysis();
+    });
+  });
+}
+
+// Highlight the pill for `col`. No-op if the row hasn't been built yet.
+function _highlightMultiPill(col) {
+  document.querySelectorAll('.multi-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.col === col);
+  });
+}
+
+// Route the sidebar's four baseline handles to a different curve without
+// re-running the analysis. Snapshots the outgoing curve's params first.
+async function _onMultiPillClick(col) {
+  if (!col || col === activeCol) return;
+  snapshotColParams(activeCol);
+  await ensureWindows([col]);
+  applyColParams(colParams[col] || defaultColParams());
+  activeCol = col;
+  _highlightMultiPill(col);
 }
 
 function updateCTBlocks() {
   const v = document.getElementById('colSelect').value;
   const isPerCol = (v === '__multi__' || v === '__concentration__');
+  const isMulti  = (v === '__multi__');
   document.getElementById('singleCTBlock').style.display = isPerCol ? 'none' : '';
   document.getElementById('multiCTBlock').style.display  = isPerCol ? ''     : 'none';
+  // In multi (global joint fit) mode, the inner OLS boundaries are unused:
+  // hide the two inner handles + inputs + OLS text lines. Concentration mode
+  // keeps all four visible because raw_tm / vantHoff / fit run per curve.
+  const section = document.getElementById('baselineSection');
+  if (section) section.classList.toggle('qr-outer-only', isMulti);
+  _qrUpdateBands();
 }
 
 async function runAnalysis() {
   if (!dfLoaded) return;
+  // Belt-and-braces: capture whatever's currently in the sidebar into
+  // colParams[activeCol] before building params. This guarantees nothing
+  // typed in the last moment (that hadn't triggered input/change yet)
+  // gets lost when the user hits Run via a shortcut or programmatic path.
+  snapshotColParams(activeCol);
   hideError(); showRunning('Fitting two-state model…');
   setStatus('running','Running…');
   document.getElementById('runBtn').disabled = true;
   const params = collectParams();
   try {
-    // Re-fetch Python modules so edits take effect without a page reload
-    for (const mod of PYTHON_MODULES) {
-      const res = await fetch(mod.path + '?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) pyodide.FS.writeFile('/'+mod.path, await res.text());
-    }
+    await refreshPython();
     pyodide.globals.set('_params_json', JSON.stringify(params));
     const raw = await pyodide.runPythonAsync(`
-import json, importlib
-import rnamelt.utils, rnamelt.methods, rnamelt.functions, rnamelt.cleaning
-importlib.reload(rnamelt.utils); importlib.reload(rnamelt.functions)
-importlib.reload(rnamelt.methods); importlib.reload(rnamelt.cleaning)
-import rnamelt.analysis_melting as _am; importlib.reload(_am)
+import json
+import rnamelt.web_bridge as _wb
 _params = json.loads(_params_json)
-json.dumps(_am.run(_df_global, _params))
+# allow_nan=False makes any NaN/Inf leak fail here as a Python exception
+# with a useful message, instead of producing invalid JSON that only
+# JSON.parse in the browser rejects (with an opaque position offset).
+json.dumps(_wb.run(_df_global, _params), allow_nan=False)
 `);
     const result = JSON.parse(raw);
-    // console.log(JSON.stringify(result, null, 2));
+    // Settings the result was computed with: conc mode reuses cached
+    // single-mode Tms only when these still match.
+    result._settingsKey = settingsKey(params);
     lastResult = result;
     if (result.error) showError(result.error);
     else {
@@ -620,15 +1041,32 @@ json.dumps(_am.run(_df_global, _params))
       //if (result.vantHoff_point) accumulateVhoff(result.vantHoff_point, result.fit.Tm);
     }
   } catch(e) { showError('Analysis error: '+e.message); console.error(e); }
-  finally { hideRunning(); setStatus('ready','Ready'); document.getElementById('runBtn').disabled=false; }
+  finally {
+    hideRunning(); setStatus('ready','Ready'); document.getElementById('runBtn').disabled=false;
+    renderWindowWarnings();
+  }
 }
 
-document.getElementById('autoBtn').addEventListener('click', () => {
-  applyColParams(defaultColParams());
-  document.getElementById('saltConc').value='150';
-  snapshotColParams(activeCol);
-  //document.getElementById('fixBaselines').checked=false;
-  runAnalysis();
+// Reset to defaults: re-detect the current curve's windows and clear the
+// Advanced panel. C_T is data, not a setting, so it is kept.
+document.getElementById('defaultsBtn').addEventListener('click', async () => {
+  if (!dfLoaded || !activeCol) return;
+  hideError();
+  ADV_IDS.forEach(id => { document.getElementById(id).value = ''; });
+  showRunning('Detecting baselines…');
+  try {
+    await refreshPython();
+    snapshotColParams(activeCol);
+    const failed = await redetect(activeCol, {keepOnFallback: false});
+    if (failed) showError(`Baseline detection failed: ${failed}`);
+    else applyColParams(colParams[activeCol]);
+  } catch(e) {
+    showError('Baseline detection error: '+e.message);
+    console.error(e);
+  } finally {
+    hideRunning();
+  }
+  await runAnalysis();
 });
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -637,6 +1075,15 @@ function renderResults(r) {
     hideInfo();
     document.getElementById('alphaTitle').innerHTML =
       `Van't Hoff &middot; ln(K<sub>a</sub>) vs 1000/T`;
+  }
+  // Reset the baseline-window bands; renderers below repopulate when auto-mode
+  // supplied them.
+  baselineWindows.fold = null;
+  baselineWindows.unf  = null;
+  if (Array.isArray(r.baseline_windows) && r.baseline_windows.length === 4) {
+    const [fl, fh, ul, uh] = r.baseline_windows;
+    baselineWindows.fold = [fl, fh];
+    baselineWindows.unf  = [ul, uh];
   }
   if (r.is_multi)         return renderMultiResults(r);
   if (r.is_concentration) return renderConcentrationResults(r);
@@ -652,20 +1099,35 @@ function renderResults(r) {
       borderWidth: 4,
       pointRadius: 0, showLine: true, tension: 0},
   ];
-  const blSrc = fit?.success ? {
-    b: fit.base_b_f,
-    ub: fit.base_ub_f} : (r.base_b_r ? {b: r.base_b_r, ub: r.base_ub_r} : null);
-  if (blSrc) {
-    const n = r.T_used.length, q = Math.floor(n / 4);
-    const [m1,b1] = blSrc.b, [m2,b2] = blSrc.ub;
-    // order:-2 keeps baselines above the raw curve (order:0) and the fit (order:-1);
-    // without this, the thick raw line hides the folded baseline.
-    const blOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
+  // Two independent baseline sources on the same plot:
+  //   Raw (feeds raw Tm + van't Hoff): OLS on the user's offset windows.
+  //     Drawn as solid grey segments spanning exactly the offset windows —
+  //     the data those OLS lines were fit on.
+  //   Fit (from the nonlinear two-state solver): joint free parameters of
+  //     the full-model fit. Drawn as dashed orange segments over the first
+  //     / last quarter of T_used, matching the historical footprint.
+  // order:-2 keeps both above the raw curve (order:0) and the fit (order:-1);
+  // without this, the thick raw line hides the folded baseline.
+  const n = r.T_used.length, q = Math.floor(n / 4);
+  const rawOpts = {borderWidth:2, pointRadius:0, showLine:true, tension:0, order:-2};
+  const fitOpts = {borderWidth:2, borderDash:[4,3], pointRadius:0, showLine:true, tension:0, order:-2};
+  if (r.base_b_r && r.base_ub_r && Array.isArray(r.baseline_windows)) {
+    const [foldLo, foldHi, unfLo, unfHi] = r.baseline_windows;
+    const [m1r,b1r] = r.base_b_r, [m2r,b2r] = r.base_ub_r;
+    if (foldHi > foldLo) meltSets.push({label:"Folded bl. (raw)",
+      data:[{x:foldLo,y:m1r*foldLo+b1r},{x:foldHi,y:m1r*foldHi+b1r}],
+      borderColor:'#555', ...rawOpts});
+    if (unfHi > unfLo)  meltSets.push({label:"Unfolded bl. (raw)",
+      data:[{x:unfLo, y:m2r*unfLo +b2r},{x:unfHi, y:m2r*unfHi +b2r}],
+      borderColor:'#555', ...rawOpts});
+  }
+  if (fit?.success && fit.base_b_f && fit.base_ub_f) {
+    const [m1f,b1f] = fit.base_b_f, [m2f,b2f] = fit.base_ub_f;
     meltSets.push(
-      {label:'Folded bl.', data:r.T_used.slice(0,q).map(t=>({x:t,y:m1*t+b1})),
-        borderColor:'#555', ...blOpts},
-      {label:'Unfolded bl.',
-        data:r.T_used.slice(n-q).map(t=>({x:t,y:m2*t+b2})), borderColor:'#555', ...blOpts},
+      {label:'Folded bl. (fit)',   data:r.T_used.slice(0,q).map(t=>({x:t,y:m1f*t+b1f})),
+        borderColor:'#D55E00', ...fitOpts},
+      {label:'Unfolded bl. (fit)', data:r.T_used.slice(n-q).map(t=>({x:t,y:m2f*t+b2f})),
+        borderColor:'#D55E00', ...fitOpts},
     );
   }
   if (fit?.success && Array.isArray(fit.fit) && fit.fit.length) {
@@ -688,10 +1150,10 @@ function renderResults(r) {
     type:'scatter', data:{datasets:meltSets},
     options:scatterOpts(
       'Temperature (°C)',
-      'Fluorescence',
+      'Signal',
       {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
     ),
-    plugins:[analysisRangePlugin()],
+    plugins:[baselineWindowsPlugin(), analysisRangePlugin()],
   });
 
   // ── Van't Hoff ln(Kₐ) vs 1000/T ──────────────────────────────────────
@@ -746,26 +1208,40 @@ function renderResults(r) {
     delete charts.chartDeriv;
   }
 
-  // ── Result cards ──────────────────────────────────────────────────────
-  let html = '';
+  // ── Result cards: one column per quantity (Tm, ΔH, ΔS, ΔG), one row per
+  // method (raw, van't Hoff, fit), so like values line up vertically ──
+  const failNote = msg => `<div class="text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2" style="grid-column:1/-1">${msg}</div>`;
+  const blank = '<div></div>';
+  const rows = [];
+  if (r.TmRaw != null) {
+    rows.push(card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C') + blank + blank + blank);
+  } else if (r.raw_error) {
+    // van't Hoff and the fit need the raw baselines, so they were skipped too
+    rows.push(failNote(`Raw Tm failed: ${r.raw_error}`));
+  }
   // van't Hoff results — shown even if curve fit failed
   if (vh?.success) {
-    html += card("Tₘ (van't Hoff)", vh.T_m_vH.toFixed(2), null, '°C');
-    html += card('ΔH° (vH)', vh.dH.toFixed(2), null, 'kcal/mol');
-    html += card('ΔS° (vH)', (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
-    html += card('ΔG°₃₇ (vH)', vh.dG.toFixed(2), null, 'kcal/mol');
+    rows.push(card("Tₘ (van't Hoff)", vh.T_m_vH.toFixed(2), null, '°C')
+      + card('ΔH° (vH)', vh.dH.toFixed(2), null, 'kcal/mol')
+      + card('ΔS° (vH)', (vh.dS * 1000).toFixed(1), null, 'cal/(mol·K)')
+      + card('ΔG°₃₇ (vH)', vh.dG.toFixed(2), null, 'kcal/mol'));
   } else if (vh && vh.success === false) {
-    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Van't Hoff analysis failed: ${vh.error || 'unknown error'}</div>`;
+    rows.push(failNote(`Van't Hoff analysis failed: ${vh.error || 'unknown error'}`));
   }
   if (fit?.success) {
-    html += card('Tₘ (fit)', fit.T_m_fit.toFixed(2), null, '°C');
-    html += card('ΔH° (fit)', fit.dH.toFixed(2), null, 'kcal/mol');
-    html += card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), null, 'cal/(mol·K)');
-    html += card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), null, 'kcal/mol');
+    rows.push(card('Tₘ (fit)', fit.T_m_fit.toFixed(2), seText(fit.SE_Tm, '°C'), '°C')
+      + card('ΔH° (fit)', fit.dH.toFixed(2), seText(fit.SE_dH, 'kcal/mol'), 'kcal/mol')
+      + card('ΔS° (fit)', (fit.dS * 1000).toFixed(1), seText(fit.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)')
+      + card('ΔG°₃₇ (fit)', fit.dG.toFixed(2), seText(fit.SE_dG, 'kcal/mol'), 'kcal/mol')
+      + (fit.converged === false ? convergenceNoteHtml('the fit') : '')
+      + seNoteHtml(fit.SE_note)
+      + seedNoteHtml(fit.seed));
   } else if (fit && fit.success === false) {
-    html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">Curve fit failed: ${fit.error || 'unknown error'}</div>`;
+    rows.push(failNote(`Curve fit failed: ${fit.error || 'unknown error'}`));
   }
-  if (r.TmRaw != null) html += card('Tₘ (raw)', r.TmRaw.toFixed(2), null, '°C');
+  const html = rows.length
+    ? `<div class="col-span-full grid gap-3" style="grid-template-columns:repeat(4,minmax(0,1fr))">${rows.join('')}</div>`
+    : '';
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
@@ -808,7 +1284,7 @@ function renderMultiResults(r) {
   meltRange.high = r.T_used[r.T_used.length - 1];
   rebuildChart('chartMelt', {
     type: 'scatter', data: {datasets: meltSets},
-    options: scatterOpts('Temperature (°C)', 'Fluorescence',
+    options: scatterOpts('Temperature (°C)', 'Signal',
       {plugins:{legend:{display:true,labels:{boxWidth:30,boxHeight:0,font:{size:10}}}}}
     ),
     plugins: [analysisRangePlugin()],
@@ -819,10 +1295,13 @@ function renderMultiResults(r) {
 
   const fmt = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
   let html = '';
-  html += card('ΔH° (multi fit)', fmt(r.dH), null, 'kcal/mol');
-  html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), null, 'cal/(mol·K)');
-  html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), null, 'kcal/mol');
+  html += card('ΔH° (multi fit)', fmt(r.dH), seText(r.SE_dH, 'kcal/mol'), 'kcal/mol');
+  html += card('ΔS° (multi fit)', fmt(r.dS * 1000, 1), seText(r.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)');
+  html += card('ΔG°₃₇ (multi fit)', fmt(r.dG), seText(r.SE_dG, 'kcal/mol'), 'kcal/mol');
   html += card('n columns', r.columns.length, null, '');
+  if (r.converged === false) html += convergenceNoteHtml('the multi fit');
+  html += seNoteHtml(r.SE_note);
+  html += seedNoteHtml(r.seed);
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.toggle('hidden', !html);
 
@@ -832,7 +1311,8 @@ function renderMultiResults(r) {
       TmRaw: prev.TmRaw ?? null,
       vh:    prev.vh    ?? null,
       fit:   prev.fit   ?? null,
-      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG},
+      multi: {T_m_fit: c.T_m_fit, dH: r.dH, dS: r.dS, dG: r.dG,
+              SE_dH: r.SE_dH, SE_dS: r.SE_dS, SE_dG: r.SE_dG},
     };
   });
   renderColResults();
@@ -841,7 +1321,6 @@ function renderMultiResults(r) {
 function renderConcentrationResults(r) {
   lastConcResult = r;
   const series = r.series || {raw: r.vantHoff, vh: null, fit: null};
-  const vh = series.raw;
   const f  = r.self_complementary ? 1 : 4;
   const methodMeta = {
     raw: {label: 'Tₘ raw', color: '#1a6b4a'},
@@ -854,7 +1333,7 @@ function renderConcentrationResults(r) {
   r.per_curve.forEach((c, i) => {
     const color = multiPalette[i % multiPalette.length];
     meltSets.push({
-      label: `${c.name} · ${c.oligoC} µM`,
+      label: `${c.name} · ${c.oligoC}${c.oligoC_B != null ? ' / ' + c.oligoC_B : ''} µM`,
       data: zip(r.T_all, c.signal_all),
       borderColor: color,
       borderWidth: 3,
@@ -891,7 +1370,7 @@ function renderConcentrationResults(r) {
   const alphaSets = [];
   ['raw', 'vh', 'fit'].forEach(key => {
     const s = series[key];
-    if (!s) return;
+    if (!s?.success) return;
     const meta = methodMeta[key];
     alphaSets.push({
       label: `${meta.label} fit`,
@@ -918,14 +1397,31 @@ function renderConcentrationResults(r) {
   // Hide derivative chart — not meaningful for this view.
   if (charts.chartDeriv) { charts.chartDeriv.destroy(); delete charts.chartDeriv; }
 
-  // ── Result cards (raw-Tm summary) ─────────────────────────────────────
+  // ── Result cards: one row per Tm extraction (raw / vH / fit) ──────────
   const fmtCard = (v, d=2) => (v == null || isNaN(v)) ? '—' : (+v).toFixed(d);
   let html = '';
-  html += card('ΔH° (raw Tₘ)',  fmtCard(vh.dH), null, 'kcal/mol');
-  html += card('ΔS° (raw Tₘ)',  fmtCard(vh.dS * 1000, 1), null, 'cal/(mol·K)');
-  html += card('ΔG°₃₇ (raw Tₘ)', fmtCard(vh.dG_37), null, 'kcal/mol');
-  html += card('R² (raw Tₘ)',   fmtCard(vh.r_squared, 4), null, '');
-  html += card('n points',      r.per_curve.length, null, '');
+  const notConverged = r.per_curve.filter(c => c.converged === false).map(c => c.name);
+  if (notConverged.length) {
+    html += convergenceNoteHtml(`the fit of ${notConverged.join(', ')}`);
+  }
+  ['raw', 'vh', 'fit'].forEach(key => {
+    const s = series[key];
+    const meta = methodMeta[key];
+    html += `<div class="col-span-full text-xs font-semibold uppercase tracking-wider text-muted mt-1">
+      <span style="color:${meta.color}">●</span> ${meta.label} series</div>`;
+    if (s?.success) html += seNoteHtml(s.SE_note);
+    if (!s?.success) {
+      html += `<div class="col-span-full text-xs font-mono text-muted bg-red-50 border border-red-200 rounded-lg px-3 py-2">${meta.label} series failed: ${s?.error || 'too few valid points'}</div>`;
+      return;
+    }
+    html += `<div class="col-span-full grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">`
+      + card(`ΔH° (${meta.label})`,   fmtCard(s.dH), seText(s.SE_dH, 'kcal/mol'), 'kcal/mol')
+      + card(`ΔS° (${meta.label})`,   fmtCard(s.dS * 1000, 1), seText(s.SE_dS, 'cal/(mol·K)', 1000, 1), 'cal/(mol·K)')
+      + card(`ΔG°₃₇ (${meta.label})`, fmtCard(s.dG_37), seText(s.SE_dG, 'kcal/mol'), 'kcal/mol')
+      + card(`R² (${meta.label})`,    fmtCard(s.r_squared, 4), null, '')
+      + card('n points',              s.n, null, '')
+      + `</div>`;
+  });
   document.getElementById('resultsGrid').innerHTML = html;
   document.getElementById('fitResults').classList.remove('hidden');
 
@@ -937,13 +1433,13 @@ function renderConcentrationResults(r) {
   document.getElementById('vhoffTableBody').innerHTML = r.per_curve.map(c => `
     <tr>
       <td>${c.name}</td>
-      <td>${c.oligoC}</td>
+      <td>${c.oligoC}${c.oligoC_B != null ? ' / ' + c.oligoC_B : ''}</td>
       <td>${(+c.lnCT).toFixed(4)}</td>
       <td>${fmtT(c.TmRaw)}</td>
       <td>${fmtIT(c.TmRaw_K ?? c.TmKelvin)}</td>
       <td>${fmtT(c.TmvH)}</td>
       <td>${fmtIT(c.TmvH_K)}</td>
-      <td>${fmtT(c.Tmfit)}</td>
+      <td${c.converged === false ? ' title="fit not converged"' : ''}>${fmtT(c.Tmfit)}${c.converged === false ? ' ⚠' : ''}</td>
       <td>${fmtIT(c.Tmfit_K)}</td>
     </tr>`).join('');
 
@@ -955,10 +1451,10 @@ function renderConcentrationResults(r) {
   document.getElementById('vhoffRegValues').innerHTML = ['raw', 'vh', 'fit'].map(key => {
     const s = series[key];
     const meta = methodMeta[key];
-    if (!s) {
+    if (!s?.success) {
       return `<tr>
         <td><span style="color:${meta.color}">●</span> ${meta.label}</td>
-        <td colspan="7" class="text-muted">— too few valid points —</td>
+        <td colspan="7" class="text-muted">— ${s?.error || 'too few valid points'} —</td>
       </tr>`;
     }
     return `<tr>
@@ -966,9 +1462,9 @@ function renderConcentrationResults(r) {
       <td>${s.n}</td>
       <td>${(+s.slope).toExponential(3)}</td>
       <td>${(+s.intercept).toExponential(3)}</td>
-      <td>${(+s.dH).toFixed(2)}</td>
-      <td>${(+s.dS * 1000).toFixed(1)}</td>
-      <td>${(+s.dG_37).toFixed(2)}</td>
+      <td>${(+s.dH).toFixed(2)}${s.SE_dH != null ? ' ± ' + (+s.SE_dH).toFixed(2) : ''}</td>
+      <td>${(+s.dS * 1000).toFixed(1)}${s.SE_dS != null ? ' ± ' + (s.SE_dS * 1000).toFixed(1) : ''}</td>
+      <td>${(+s.dG_37).toFixed(2)}${s.SE_dG != null ? ' ± ' + (+s.SE_dG).toFixed(2) : ''}</td>
       <td>${(+s.r_squared).toFixed(4)}</td>
     </tr>`;
   }).join('');
@@ -990,8 +1486,23 @@ function accumulateColumnResult(r) {
     TmRaw:  r.TmRaw,
     vh:     r.vantHoff?.success ? r.vantHoff    : null,
     fit:    r.fit_result?.success ? r.fit_result : null,
+    // Fingerprint the baseline windows used to compute these values so
+    // conc mode can tell whether the cache is still valid before reusing.
+    windows: Array.isArray(r.baseline_windows) ? [...r.baseline_windows] : null,
+    settingsKey: r._settingsKey ?? null,
+    concKey: JSON.stringify([r.oligoC ?? null, r.oligoC_B ?? null]),
+    base_b_r:  r.base_b_r  || null,
+    base_ub_r: r.base_ub_r || null,
   };
   renderColResults();
+}
+
+// Two [fold_lo, fold_hi, unf_lo, unf_hi] tuples match within 1e-6 °C.
+function _windowsMatch(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== 4 || b.length !== 4) return false;
+  for (let i = 0; i < 4; i++) if (Math.abs(a[i] - b[i]) > 1e-6) return false;
+  return true;
 }
 
 function renderColResults() {
@@ -1026,6 +1537,26 @@ window.removeColResult = function(col) {
   delete colResults[col];
   renderColResults();
 };
+
+// "± SE unit" for a card's second line; null when the error is undefined.
+function seText(se, unit, scale = 1, digits = 2) {
+  return (se == null || !isFinite(se)) ? null : `± ${(se * scale).toFixed(digits)} ${unit}`;
+}
+// Full-width muted line explaining a missing / approximate error.
+function seNoteHtml(note) {
+  return note ? `<div class="col-span-full text-xs font-mono text-muted" style="grid-column:1/-1">Standard error: ${note}</div>` : '';
+}
+// Full-width amber line: the solver stopped at its evaluation limit.
+function convergenceNoteHtml(what) {
+  return `<div class="col-span-full text-xs font-mono text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" style="grid-column:1/-1">Not converged: ${what} stopped at the solver's evaluation limit, so the values may be off. Check the baseline windows and the starting values.</div>`;
+}
+// Full-width muted line: where the fit's ΔH / ΔS starting values came from.
+function seedNoteHtml(seed) {
+  if (!seed) return '';
+  const src = {user: 'your value', vh: "van't Hoff", fallback: 'default', multistart: 'multistart'};
+  const from = k => src[seed[k]] ?? seed[k];
+  return `<div class="col-span-full text-xs font-mono text-muted" style="grid-column:1/-1">Started from ΔH ${(+seed.dH).toFixed(1)} kcal/mol (${from('dH_from')}), ΔS ${(seed.dS * 1000).toFixed(1)} cal/(mol·K) (${from('dS_from')})</div>`;
+}
 
 function card(label,value,err,unit){
   return `<div class="bg-surface rounded-xl border border-border shadow-sm p-4">
@@ -1090,6 +1621,8 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     'Tm_vH_C', 'dH_vH_kcal_mol', 'dS_vH_cal_molK', 'dG37_vH_kcal_mol',
     'Tm_fit_C', 'dH_fit_kcal_mol', 'dS_fit_cal_molK', 'dG37_fit_kcal_mol',
     'Tm_multi_C', 'dH_multi_kcal_mol', 'dS_multi_cal_molK', 'dG37_multi_kcal_mol',
+    'SE_dH_multi_kcal_mol', 'SE_dS_multi_cal_molK', 'SE_dG37_multi_kcal_mol',
+    'SE_Tm_fit_C', 'SE_dH_fit_kcal_mol', 'SE_dS_fit_cal_molK', 'SE_dG37_fit_kcal_mol',
   ];
   const cell = (v, scale=1) => (v == null || isNaN(v)) ? '' : (+v * scale).toString();
   const lines = [headers.join(',')];
@@ -1101,6 +1634,8 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       cell(e.vh?.T_m_vH),    cell(e.vh?.dH),    cell(e.vh?.dS, 1000),    cell(e.vh?.dG),
       cell(e.fit?.T_m_fit),  cell(e.fit?.dH),   cell(e.fit?.dS, 1000),   cell(e.fit?.dG),
       cell(e.multi?.T_m_fit),cell(e.multi?.dH), cell(e.multi?.dS, 1000), cell(e.multi?.dG),
+      cell(e.multi?.SE_dH),  cell(e.multi?.SE_dS, 1000), cell(e.multi?.SE_dG),
+      cell(e.fit?.SE_Tm),    cell(e.fit?.SE_dH),  cell(e.fit?.SE_dS, 1000),   cell(e.fit?.SE_dG),
     ].join(','));
   }
 
@@ -1112,7 +1647,7 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
     lines.push('');
     lines.push(`# concentration series (struct=${cr.struct_type}, self_complementary=${cr.self_complementary}, f=${f})`);
     lines.push([
-      'column','CT_uM','CT_M','ln_CT_over_f',
+      'column','CT_uM','CT_B_uM','CT_M','ln_CT_over_f',
       'Tm_raw_C','inv_Tm_raw_K',
       'Tm_vH_C','inv_Tm_vH_K',
       'Tm_fit_C','inv_Tm_fit_K',
@@ -1121,6 +1656,7 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       lines.push([
         `"${c.name.replace(/"/g, '""')}"`,
         cell(c.oligoC),
+        cell(c.oligoC_B),
         cell(c.c0),
         cell(c.lnCT),
         cell(c.TmRaw),    invK(c.TmRaw_K ?? c.TmKelvin),
@@ -1129,11 +1665,12 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
       ].join(','));
     });
     lines.push('');
-    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared'].join(','));
+    lines.push(['method','n','slope_K^-1','intercept_K^-1','dH_kcal_mol','dS_cal_molK','dG37_kcal_mol','r_squared',
+                'SE_dH_kcal_mol','SE_dS_cal_molK','SE_dG37_kcal_mol'].join(','));
     [['raw','Tm_raw'], ['vh','Tm_vH'], ['fit','Tm_fit']].forEach(([key, lbl]) => {
       const s = csers[key];
-      if (!s) {
-        lines.push([lbl, '0', '', '', '', '', '', ''].join(','));
+      if (!s?.success) {
+        lines.push([lbl, '0', '', '', '', '', '', '', '', '', ''].join(','));
         return;
       }
       lines.push([
@@ -1145,6 +1682,9 @@ document.getElementById('downloadBtn').addEventListener('click',()=>{
         cell(s.dS, 1000),
         cell(s.dG_37),
         cell(s.r_squared),
+        cell(s.SE_dH),
+        cell(s.SE_dS, 1000),
+        cell(s.SE_dG),
       ].join(','));
     });
     if (cr.skipped && cr.skipped.length) {
@@ -1183,19 +1723,129 @@ document.getElementById('downloadPlotsBtn').addEventListener('click', () => {
   for (const id of ['chartMelt', 'chartAlpha', 'chartDeriv']) {
     const c = charts[id];
     if (!c || !c.canvas) continue;
+    let svg;
+    try { svg = chartToSvg(c); }
+    catch(e) { showError(`SVG export of the ${labels[id]} plot failed: ${e.message}`); console.error(e); continue; }
+    const url = URL.createObjectURL(new Blob([svg], {type: 'image/svg+xml'}));
     const a = document.createElement('a');
-    a.href     = c.toBase64Image('image/png', 1.0);
-    a.download = `${prefix}_${labels[id]}.png`;
+    a.href     = url;
+    a.download = `${prefix}_${labels[id]}.svg`;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     n++;
   }
   if (!n) showError('No plots to download — run an analysis first.');
 });
 
-// ── Reset ─────────────────────────────────────────────────────────────────────
-document.getElementById('resetBtn').addEventListener('click',()=>{
+// canvas2svg lacks two canvas calls Chart.js 4 makes: setLineDash (dashed
+// fit / baseline lines, saved and restored with the rest of the state) and
+// resetTransform. Added once, before the first export.
+function _patchC2S() {
+  if (C2S.prototype._rnameltPatched) return;
+  const P = C2S.prototype;
+  const {save, restore, stroke} = P;
+  P.setLineDash = function(d) { this._lineDash = (d || []).slice(); };
+  P.getLineDash = function() { return (this._lineDash || []).slice(); };
+  P.save = function() {
+    (this._dashStack ||= []).push(this._lineDash || []);
+    return save.apply(this, arguments);
+  };
+  P.restore = function() {
+    this._lineDash = (this._dashStack || []).pop() || [];
+    return restore.apply(this, arguments);
+  };
+  P.stroke = function() {
+    stroke.apply(this, arguments);
+    if (this._lineDash?.length) {
+      this.__currentElement.setAttribute('stroke-dasharray', this._lineDash.join(','));
+    }
+  };
+  P.resetTransform = function() { this.setTransform(1, 0, 0, 1, 0, 0); };
+  // Its font parser rejects quoted family names, like Chart.js's default
+  // "'Helvetica Neue', 'Helvetica', 'Arial', sans-serif".
+  P.__parseFont = function() {
+    const m = /^\s*(?:(italic|oblique)\s+)?(?:(small-caps)\s+)?(?:(normal|bold(?:er)?|lighter|[1-9]00)\s+)?([.\d]+(?:px|pt|em|rem|%))(?:\s*\/\s*\S+)?\s+(.+?)\s*$/i
+      .exec(this.font) || [];
+    return {style: m[1] || 'normal', decoration: m[2] || 'normal', weight: m[3] || 'normal',
+            size: m[4] || '10px', family: m[5] || 'sans-serif', href: null};
+  };
+  // On a canvas the current path survives save(); canvas2svg starts a new
+  // <g> there and then refuses to stroke / fill the path. Put the path into
+  // a fresh <path> in the current group instead.
+  const applyPath = P.__applyCurrentDefaultPath;
+  P.__applyCurrentDefaultPath = function() {
+    if (this.__currentElement.nodeName !== 'path') {
+      const path = this.__createElement('path', {}, true);
+      this.__closestGroupOrSvg().appendChild(path);
+      this.__currentElement = path;
+    }
+    return applyPath.apply(this, arguments);
+  };
+  // clip() moves the current path into a <clipPath> without writing its
+  // geometry, which hides everything drawn inside the clip.
+  const clip = P.clip;
+  P.clip = function() {
+    this.__applyCurrentDefaultPath();
+    return clip.apply(this, arguments);
+  };
+  P._rnameltPatched = true;
+}
+
+// Redraw a live chart onto an SVG context, with the same data, plugins and
+// current zoom / pan, and return the SVG document as text.
+function chartToSvg(chart) {
+  _patchC2S();
+  const w = chart.width, h = chart.height;
+  const svgCtx = new C2S(w, h);
+  const canvas = {width: w, height: h, style: {}, getContext: () => svgCtx};
+  const opts = chart.config.options || {};
+  const scales = {};
+  for (const [id, sc] of Object.entries(chart.scales)) {
+    scales[id] = {...(opts.scales?.[id] || {}), min: sc.min, max: sc.max};
+  }
+  const copy = new Chart(canvas, {
+    type: chart.config.type,
+    // Own copies of the data arrays: Chart.js hooks into the arrays it is given.
+    data: {
+      labels:   chart.data.labels ? [...chart.data.labels] : undefined,
+      datasets: chart.data.datasets.map(ds => ({
+        ...ds,
+        data: ds.data.map(pt => (pt && typeof pt === 'object') ? {...pt} : pt),
+        // Lines are otherwise stroked from cached Path2D objects, which the
+        // SVG context cannot record; an (empty) segment option makes
+        // Chart.js draw them with moveTo / lineTo.
+        segment: ds.segment || {},
+      })),
+    },
+    options: {
+      ...opts,
+      scales,
+      animation: false,
+      responsive: false,
+      maintainAspectRatio: false,
+      devicePixelRatio: 1,
+      events: [],
+      plugins: {...(opts.plugins || {}), zoom: false, tooltip: {enabled: false}},
+    },
+    plugins: chart.config.plugins,
+    platform: Chart.BasicPlatform,
+  });
+  try {
+    return svgCtx.getSerializedSvg(true);
+  } finally {
+    copy.destroy();
+  }
+}
+
+// ── Clear ─────────────────────────────────────────────────────────────────────
+// Wipe everything and return to the upload screen: data (also in Pyodide),
+// concentrations, windows, Advanced settings, results and charts.
+document.getElementById('clearBtn').addEventListener('click', async () => {
+  const hasState = dfLoaded || Object.keys(colResults).length > 0;
+  if (hasState && !confirm('Clear the data, all concentrations, baseline windows, '
+                           + 'Advanced settings and results?')) return;
   dfLoaded=false; lastResult=null; vhoffPoints=[]; lastConcResult=null;
   document.getElementById('vhoffSection').classList.add('hidden');
   document.getElementById('vhoffReg').classList.add('hidden');
@@ -1204,18 +1854,40 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
   document.getElementById('uploadSection').style.display='';
   document.getElementById('resultsSection').classList.add('hidden');
   document.getElementById('fileInput').value='';
+  document.getElementById('fileName').textContent='';
+  document.getElementById('fileMeta').textContent='';
   document.getElementById('runBtn').disabled=true;
-  document.getElementById('autoBtn').disabled=true;
-  ['T_low','T_high'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('CT').value='0.5';
-  document.getElementById('saltConc').value='150';
-  document.getElementById('bl_lower_offset').value='10';
-  document.getElementById('bl_upper_offset').value='10';
-  //document.getElementById('fixBaselines').checked=false;
+  document.getElementById('defaultsBtn').disabled=true;
+  // Per-curve state, column choice and concentrations.
+  Object.keys(colParams).forEach(k => delete colParams[k]);
   for (const k of Object.keys(colResults)) delete colResults[k];
   renderColResults();
-  Object.values(charts).forEach(c=>c?.destroy());
-  hideError(); hideRunning();
+  activeCol = null;
+  dataTRange = {min: null, max: null};
+  document.getElementById('colSelect').innerHTML = '';
+  document.getElementById('colSection').style.display = 'none';
+  document.getElementById('multiCTGrid').innerHTML = '';
+  document.getElementById('CT').value='';
+  document.getElementById('CT_B').value='';
+  document.getElementById('unequalCT').checked = false;
+  applyUnequalCT();
+  updateCTBlocks();
+  // Windows and slider.
+  _QR_INPUTS.forEach(id => { document.getElementById(id).value=''; });
+  document.getElementById('baselineSlider').style.display = 'none';
+  meltRange.low = meltRange.high = null;
+  baselineWindows.fold = baselineWindows.unf = null;
+  // Advanced settings.
+  ADV_IDS.forEach(id => { document.getElementById(id).value=''; });
+  document.getElementById('advancedSection').open = false;
+  // Charts and banners.
+  Object.keys(charts).forEach(k => { charts[k]?.destroy(); delete charts[k]; });
+  hideError(); hideRunning(); hideInfo(); renderWindowWarnings();
+  if (pyodide) {
+    try { await pyodide.runPythonAsync(`globals().pop('_df_global', None)`); }
+    catch(e) { console.error(e); }
+  }
+  setStatus('ready','Ready');
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1226,69 +1898,253 @@ function collectParams() {
   const isConc  = col === '__concentration__';
   const isPerCol = isMulti || isConc;
   const params={
-    signal_type:     document.querySelector('input[name="signalType"]:checked')?.value || 'absorbance',
     struct_type:     document.querySelector('input[name="structType"]:checked')?.value  || 'heterodimer',
     column:          isMulti ? '__multi__' : isConc ? '__concentration__' : col,
-    bl_lower_offset: g('bl_lower_offset') ?? 10,
-    bl_upper_offset: g('bl_upper_offset') ?? 10,
-    salt:            isPerCol ? (g('saltConcMulti') ?? 150) : (g('saltConc') ?? 150),
-    oligo:           g('CT') ?? 0.5,
+    ...advancedParams(),
   };
+  // C_T is required — no silent fallback. Missing values become null and
+  // the bridge raises "params['oligo'] is required" so the user sees a
+  // clear "please enter µM" message.
+  // Unequal strands: [A, B] when B is filled in, otherwise equal strands.
+  const unequal = document.getElementById('unequalCT').checked;
+  const conc = (a, b) => (unequal && Number.isFinite(b) && b > 0) ? [a, b] : a;
+  const oligoSingle = g('CT');
+  if (oligoSingle != null) params.oligo = conc(oligoSingle, g('CT_B'));
   if (isPerCol) {
     const oligoMulti = {};
     document.querySelectorAll('.multi-ct').forEach(el => {
       const v = parseFloat(el.value);
-      oligoMulti[el.dataset.col] = isNaN(v) ? 0.5 : v;
+      const b = parseFloat(document.querySelector(`.multi-ct-b[data-col="${el.dataset.col}"]`)?.value);
+      if (Number.isFinite(v) && v > 0) oligoMulti[el.dataset.col] = conc(v, b);
     });
     params.oligo_multi = oligoMulti;
+    // Snapshot whatever's currently on the sidebar into the active pill's
+    // colParams so the latest edits are captured before we harvest windows
+    // for every column.
+    snapshotColParams(activeCol);
+    const columnWindows = {};
+    for (const col of Object.keys(oligoMulti)) {
+      const cp = colParams[col];
+      if (!cp) continue;
+      const fl = parseFloat(cp.fold_low_T),  fh = parseFloat(cp.fold_high_T);
+      const ul = parseFloat(cp.unf_low_T),   uh = parseFloat(cp.unf_high_T);
+      if ([fl, fh, ul, uh].every(Number.isFinite)) {
+        columnWindows[col] = {fold_low_T: fl, fold_high_T: fh,
+                              unf_low_T:  ul, unf_high_T:  uh};
+      }
+    }
+    if (Object.keys(columnWindows).length > 0) {
+      params.column_windows = columnWindows;
+    }
+    // Conc mode: reuse per-curve results from prior single-mode runs
+    // whenever the cached windows fingerprint matches the current
+    // column_windows for that column. No cached entry or mismatched
+    // windows → fall through and let the bridge recompute for that
+    // column. Multi mode ignores this field.
+    if (isConc) {
+      const precomputedTms = {};
+      for (const col of Object.keys(oligoMulti)) {
+        const cached = colResults[col];
+        const cw = columnWindows[col];
+        if (!cached || !cached.windows || !cw) continue;
+        const currentWindow = [
+          cw.fold_low_T, cw.fold_high_T, cw.unf_low_T, cw.unf_high_T,
+        ];
+        if (!_windowsMatch(cached.windows, currentWindow)) continue;
+        if (cached.settingsKey !== settingsKey(params)) continue;
+        const o = oligoMulti[col];
+        if (cached.concKey !== JSON.stringify(Array.isArray(o) ? o : [o, null])) continue;
+        precomputedTms[col] = {
+          Tm_raw: cached.TmRaw,
+          Tm_vH:  cached.vh?.T_m_vH ?? null,
+          Tm_fit: cached.fit?.T_m_fit ?? null,
+          converged: cached.fit?.converged ?? null,
+          base_b:  cached.base_b_r  ?? null,
+          base_ub: cached.base_ub_r ?? null,
+        };
+      }
+      if (Object.keys(precomputedTms).length > 0) {
+        params.precomputed_tms = precomputedTms;
+      }
+    }
   }
-  if (g('T_low')    !== null) params.T_low   = g('T_low');
-  if (g('T_high')   !== null) params.T_high  = g('T_high');
+  // Top-level four-window boundaries. Only send when all four are set.
+  // In multi/conc mode these act as the shared fallback for any column
+  // that doesn't have an entry in column_windows above.
+  const fl = g('fold_low_T'),  fh = g('fold_high_T');
+  const ul = g('unf_low_T'),   uh = g('unf_high_T');
+  if (fl != null && fh != null && ul != null && uh != null) {
+    params.fold_low_T  = fl;
+    params.fold_high_T = fh;
+    params.unf_low_T   = ul;
+    params.unf_high_T  = uh;
+  }
   return params;
 }
 
-function setIfEmpty(id,v){ const el=document.getElementById(id); if(!el.value) el.value=v; }
+// Advanced panel → params. Blank fields are omitted, so the API defaults
+// apply. ΔS is entered in cal/(mol·K), like the result cards; the API
+// takes kcal/(mol·K).
+function advancedParams() {
+  const num = id => {
+    const v = document.getElementById(id).value.trim();
+    return v === '' ? null : Number(v);
+  };
+  const out = {};
+  const border = num('advBorder');
+  if (border != null) out.vh = {border};
+  const fitInit = {};
+  const dH = num('advDHInit'), dS = num('advDSInit'), lin = num('advLinInit');
+  if (dH  != null) fitInit.dH_init  = dH;
+  if (dS  != null) fitInit.dS_init  = dS / 1000;
+  if (lin != null) fitInit.lin_init = lin;
+  if (Object.keys(fitInit).length) out.fit_init = fitInit;
+  const bm = document.getElementById('advBoundsMode').value;
+  if (bm) out.bounds_mode = bm;
+  const st = document.getElementById('advStrategy').value;
+  if (st) out.strategy = st;
+  return out;
+}
 
-function initTRangeSlider(tMin, tMax){
-  const wrap = document.getElementById('tRangeSlider');
-  const lo   = document.getElementById('trMin');
-  const hi   = document.getElementById('trMax');
-  const fill = document.getElementById('trFill');
-  const tLowIn  = document.getElementById('T_low');
-  const tHighIn = document.getElementById('T_high');
-  wrap.style.display = '';
-  for (const el of [lo, hi]) { el.min = tMin; el.max = tMax; el.step = 0.5; }
-  lo.value = parseFloat(tLowIn.value)  || tMin;
-  hi.value = parseFloat(tHighIn.value) || tMax;
-  const updateFill = () => {
-    const span = tMax - tMin || 1;
-    fill.style.left  = ((+lo.value - tMin) / span * 100) + '%';
-    fill.style.right = ((tMax - +hi.value) / span * 100) + '%';
+// Everything besides the windows that changes a per-curve result.
+function settingsKey(params) {
+  return JSON.stringify([params.struct_type, params.vh ?? null, params.fit_init ?? null,
+                         params.bounds_mode ?? null, params.strategy ?? null]);
+}
+
+document.querySelectorAll('.adv-input').forEach(el =>
+  el.addEventListener('change', () => { if (dfLoaded) runAnalysis(); }));
+
+// ── Quad-range baseline slider ────────────────────────────────────────────────
+// Four handles on a shared T-axis. Order enforced: F_lo < F_hi < U_lo < U_hi,
+// with a BASELINE_MIN_TRANS_GAP °C floor between fold_hi and unf_lo so the
+// two OLS windows can never merge and eat the transition data. Number inputs
+// (fold_low_T, fold_high_T, unf_low_T, unf_high_T) are kept synced both ways.
+
+const _QR_IDS = ['qrFoldLo','qrFoldHi','qrUnfLo','qrUnfHi'];
+const _QR_INPUTS = ['fold_low_T','fold_high_T','unf_low_T','unf_high_T'];
+
+function _qrHandles(){
+  return _QR_IDS.map(id => document.getElementById(id));
+}
+function _qrInputs(){
+  return _QR_INPUTS.map(id => document.getElementById(id));
+}
+
+function _clampAndOrder(vals){
+  // vals: [fl, fh, ul, uh] as numbers. Enforce fl <= fh < ul <= uh with a
+  // BASELINE_MIN_TRANS_GAP °C floor between fh and ul. Equal edges are a
+  // zero-width window: a flat baseline where the plateau is missing.
+  let [fl, fh, ul, uh] = vals;
+  const g = BASELINE_MIN_TRANS_GAP;
+  if (fh < fl) fh = fl;
+  if (ul <= fh + g) ul = fh + g;
+  if (uh < ul) uh = ul;
+  return [fl, fh, ul, uh];
+}
+
+function _qrUpdateBands(){
+  const wrap = document.getElementById('baselineSlider');
+  if (!wrap || wrap.style.display === 'none') return;
+  const [fl, fh, ul, uh] = _qrHandles().map(el => +el.value);
+  const tMin = dataTRange.min, tMax = dataTRange.max;
+  const span = tMax - tMin || 1;
+  const pct = t => ((t - tMin) / span * 100) + '%';
+  const setBand = (id, lo, hi) => {
+    const el = document.getElementById(id);
+    el.style.left  = pct(lo);
+    el.style.right = (100 - parseFloat(pct(hi))) + '%';
   };
-  const sync = (src) => {
-    if (+lo.value > +hi.value - 0.5) {
-      if (src === 'lo') lo.value = +hi.value - 0.5;
-      else              hi.value = +lo.value + 0.5;
+  const outerOnly = document.getElementById('baselineSection')
+                            ?.classList.contains('qr-outer-only');
+  if (outerOnly) {
+    // Single band spanning the fit window; fold/unf bands are CSS-hidden.
+    setBand('qrTransBand', fl, uh);
+  } else {
+    setBand('qrFoldBand',  fl, fh);
+    setBand('qrTransBand', fh, ul);
+    setBand('qrUnfBand',   ul, uh);
+  }
+  // Outer handles → analysisRangePlugin's dashed lines + grey mask.
+  meltRange.low  = fl;
+  meltRange.high = uh;
+  // Inner handles → baselineWindowsPlugin's dashed lines + shaded bands.
+  // Cleared in outer-only mode so the plugin doesn't paint stale inner
+  // markers when the user next switches back to a mode that renders it.
+  if (outerOnly) {
+    baselineWindows.fold = null;
+    baselineWindows.unf  = null;
+  } else {
+    baselineWindows.fold = [fl, fh];
+    baselineWindows.unf  = [ul, uh];
+  }
+  if (charts.chartMelt) charts.chartMelt.update('none');
+}
+
+function _syncBaselineInputsFromSlider(source){
+  const handles = _qrHandles();
+  const raw = handles.map(el => +el.value);
+  const ordered = _clampAndOrder(raw);
+  // Write ordered values back to any handle whose value drifted.
+  handles.forEach((el, i) => {
+    if (Math.abs(raw[i] - ordered[i]) > 1e-9) el.value = ordered[i];
+  });
+  const inputs = _qrInputs();
+  inputs.forEach((el, i) => { el.value = ordered[i].toFixed(2); });
+  _qrUpdateBands();
+}
+
+function syncBaselineSliderFromInputs(){
+  const wrap = document.getElementById('baselineSlider');
+  if (!wrap || wrap.style.display === 'none') return;
+  const inputs = _qrInputs();
+  const raw = inputs.map(el => parseFloat(el.value));
+  if (raw.some(v => !Number.isFinite(v))) return;
+  const ordered = _clampAndOrder(raw);
+  _qrHandles().forEach((el, i) => { el.value = ordered[i]; });
+  inputs.forEach((el, i) => {
+    if (parseFloat(el.value).toFixed(2) !== ordered[i].toFixed(2)) {
+      el.value = ordered[i].toFixed(2);
     }
-    tLowIn.value  = (+lo.value).toFixed(1);
-    tHighIn.value = (+hi.value).toFixed(1);
-    updateFill();
-    meltRange.low  = +lo.value;
-    meltRange.high = +hi.value;
-    if (charts.chartMelt) charts.chartMelt.update('none');
-  };
-  lo.addEventListener('input', () => sync('lo'));
-  hi.addEventListener('input', () => sync('hi'));
-  lo.addEventListener('change', () => { if (dfLoaded) runAnalysis(); });
-  hi.addEventListener('change', () => { if (dfLoaded) runAnalysis(); });
-  const fromNum = () => {
-    lo.value = parseFloat(tLowIn.value)  || tMin;
-    hi.value = parseFloat(tHighIn.value) || tMax;
-    updateFill();
-  };
-  tLowIn.addEventListener('change', fromNum);
-  tHighIn.addEventListener('change', fromNum);
-  updateFill();
+  });
+  _qrUpdateBands();
+}
+
+function initBaselineSlider(tMin, tMax){
+  const wrap = document.getElementById('baselineSlider');
+  wrap.style.display = '';
+  const handles = _qrHandles();
+  const inputs  = _qrInputs();
+  for (const el of handles) { el.min = tMin; el.max = tMax; }
+
+  // Park the handles until the curve's windows are applied: the inputs
+  // stay blank, so nothing here is sent to the analysis.
+  const span = tMax - tMin;
+  const parked = [tMin, tMin + span * 0.25, tMax - span * 0.25, tMax];
+  handles.forEach((el, i) => {
+    const v = parseFloat(inputs[i].value);
+    el.value = Number.isFinite(v) ? v : parked[i];
+  });
+
+  if (!sliderBound) {
+    // Slider → inputs (live while dragging).
+    handles.forEach(el => {
+      el.addEventListener('input',  _syncBaselineInputsFromSlider);
+      el.addEventListener('change', () => { onWindowsEdited(); if (dfLoaded) runAnalysis(); });
+    });
+    // Inputs → slider (on commit / blur).
+    inputs.forEach(el => {
+      el.addEventListener('change', () => {
+        syncBaselineSliderFromInputs();
+        onWindowsEdited();
+        if (dfLoaded) runAnalysis();
+      });
+    });
+    sliderBound = true;
+  }
+
+  if (inputs.every(el => Number.isFinite(parseFloat(el.value)))) _syncBaselineInputsFromSlider();
+  else _qrUpdateBands();
 }
 
 function rebuildChart(id,config){
@@ -1329,6 +2185,55 @@ function scatterOpts(xLabel,yLabel,extra={}){
 function zip(xs,ys){ return xs.map((x,i)=>({x,y:ys[i]})); }
 
 const meltRange = {low: null, high: null};
+// Filled in by renderResults from r.baseline_windows. Two [lo, hi] bands
+// showing where the folded / unfolded baselines are actually being fit
+// under the current offsets — updates on every re-run.
+const baselineWindows = {fold: null, unf: null};
+
+// Shade the two baseline-fit windows on the melt chart, and draw dashed
+// vertical lines at the two INNER boundaries (fold_high_T / unf_low_T) so
+// the inner slider handles get the same live visual feedback as the
+// outer ones (which analysisRangePlugin already draws from meltRange).
+// No-op when neither band has been populated.
+function baselineWindowsPlugin(){
+  return {
+    id: 'baselineWindows',
+    beforeDatasetsDraw(chart){
+      if (baselineWindows.fold == null && baselineWindows.unf == null) return;
+      const {ctx, chartArea:{top,bottom,left,right}, scales:{x}} = chart;
+      ctx.save();
+      const drawBand = (band, color) => {
+        if (!band) return;
+        const [lo, hi] = band;
+        const xLo = Math.max(left, Math.min(right, x.getPixelForValue(lo)));
+        const xHi = Math.max(left, Math.min(right, x.getPixelForValue(hi)));
+        if (xHi <= xLo) return;
+        ctx.fillStyle = color;
+        ctx.fillRect(xLo, top, xHi - xLo, bottom - top);
+      };
+      drawBand(baselineWindows.fold, 'rgba(86, 180, 233, 0.10)');   // folded band
+      drawBand(baselineWindows.unf,  'rgba(213, 94, 0, 0.10)');     // unfolded band
+
+      // Dashed lines at fold_high_T (right edge of folded band) and
+      // unf_low_T (left edge of unfolded band). Match analysisRangePlugin's
+      // outer-line style so the four handles feel visually equivalent.
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      const drawLine = (t) => {
+        if (t == null) return;
+        const xPix = x.getPixelForValue(t);
+        if (xPix < left || xPix > right) return;
+        ctx.beginPath();
+        ctx.moveTo(xPix, top); ctx.lineTo(xPix, bottom);
+        ctx.stroke();
+      };
+      if (baselineWindows.fold) drawLine(baselineWindows.fold[1]);   // fold_high_T
+      if (baselineWindows.unf)  drawLine(baselineWindows.unf[0]);    // unf_low_T
+      ctx.restore();
+    }
+  };
+}
 
 function analysisRangePlugin(){
   return {
